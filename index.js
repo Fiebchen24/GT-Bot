@@ -190,30 +190,48 @@ async function giveOrTakeRoleFromChannel(interaction, mode) {
     const messages = await fetchMessages(channel, limit);
     const userIds = collectMentionedUserIds(messages);
 
-    let success = 0;
+    let added = 0;
+    let removed = 0;
+    let alreadyHad = 0;
+    let didNotHave = 0;
     let failed = 0;
 
     for (const userId of userIds) {
       try {
         const member = await interaction.guild.members.fetch(userId);
+        const hasRole = member.roles.cache.has(role.id);
 
         if (mode === "give") {
-          await member.roles.add(role);
-        } else {
-          await member.roles.remove(role);
-        }
+          if (hasRole) {
+            alreadyHad++;
+            continue;
+          }
 
-        success++;
+          await member.roles.add(role);
+          added++;
+        } else {
+          if (!hasRole) {
+            didNotHave++;
+            continue;
+          }
+
+          await member.roles.remove(role);
+          removed++;
+        }
       } catch (error) {
         console.error(`Failed to ${mode} role for ${userId}:`, error.message);
         failed++;
       }
     }
 
-    const actionText = mode === "give" ? "Added" : "Removed";
+    if (mode === "give") {
+      return interaction.editReply(
+        `Done.\nRole: ${role}\nUsers found: ${userIds.size}\nNewly added: ${added}\nAlready had role: ${alreadyHad}\nFailed: ${failed}`
+      );
+    }
 
     return interaction.editReply(
-      `Done.\nRole: ${role}\nUsers found: ${userIds.size}\n${actionText}: ${success}\nFailed: ${failed}`
+      `Done.\nRole: ${role}\nUsers found: ${userIds.size}\nRemoved: ${removed}\nDid not have role: ${didNotHave}\nFailed: ${failed}`
     );
   } catch (error) {
     return interaction.editReply(`Error: ${error.message}`);
@@ -253,6 +271,7 @@ async function updateEarningsRoles(interaction) {
     }
 
     let updated = 0;
+    let unchanged = 0;
     let skipped = 0;
     let failed = 0;
 
@@ -266,9 +285,27 @@ async function updateEarningsRoles(interaction) {
 
       try {
         const member = await interaction.guild.members.fetch(entry.userId);
+        const currentEarningsRoles = allEarningsRoleIds.filter(roleId =>
+          member.roles.cache.has(roleId)
+        );
 
-        await member.roles.remove(allEarningsRoleIds).catch(() => {});
-        await member.roles.add(roleData.roleId);
+        const alreadyCorrect =
+          currentEarningsRoles.length === 1 && currentEarningsRoles[0] === roleData.roleId;
+
+        if (alreadyCorrect) {
+          unchanged++;
+          continue;
+        }
+
+        const rolesToRemove = currentEarningsRoles.filter(roleId => roleId !== roleData.roleId);
+
+        if (rolesToRemove.length) {
+          await member.roles.remove(rolesToRemove);
+        }
+
+        if (!member.roles.cache.has(roleData.roleId)) {
+          await member.roles.add(roleData.roleId);
+        }
 
         updated++;
       } catch (error) {
@@ -278,7 +315,7 @@ async function updateEarningsRoles(interaction) {
     }
 
     return interaction.editReply(
-      `Done.\nUsers with earnings found: ${latestByUser.size}\nUpdated: ${updated}\nSkipped: ${skipped}\nFailed: ${failed}`
+      `Done.\nUsers with earnings found: ${latestByUser.size}\nUpdated: ${updated}\nAlready correct: ${unchanged}\nSkipped: ${skipped}\nFailed: ${failed}`
     );
   } catch (error) {
     return interaction.editReply(`Error: ${error.message}`);

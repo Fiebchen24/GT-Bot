@@ -53,3 +53,24 @@ In the Discord Developer Portal, enable:
 - Message Content Intent
 
 The bot role must be above all roles it should give or remove.
+
+
+## V2 Update
+
+- `/giverolefromchannel` checks first if a member already has the selected role.
+- `/takerolefromchannel` checks first if a member does not have the selected role.
+- `/earningsroles` updates earnings roles intelligently:
+  - removes old earnings roles only when needed
+  - adds the correct new earnings role
+  - skips users who already have the correct earnings role
+
+Example result:
+
+```txt
+Done.
+Role: @Role
+Users found: 10
+Newly added: 6
+Already had role: 4
+Failed: 0
+```

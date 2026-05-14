@@ -1,6 +1,6 @@
 {
   "name": "gt-role-bot",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Small Discord role bot for giving/taking roles from mentions and updating earnings roles.",
   "main": "index.js",
   "scripts": {
