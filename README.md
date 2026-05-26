@@ -1,76 +1,80 @@
-# GT Role Bot
+# GT Role Bot V3
 
-Small Discord bot for role management.
+Discord role utility bot for GT.
 
-## Features
+## Commands
 
-- `/giverolefromchannel` gives a selected role to everyone mentioned in a selected channel.
-- `/takerolefromchannel` removes a selected role from everyone mentioned in a selected channel.
-- `/earningsroles` reads mentions + earnings numbers and updates the matching earnings role.
-- Old earnings roles are removed before the new earnings role is added.
+### /giverolefromchannel
+Gives a selected role to all users mentioned in a selected channel. Checks who already has the role.
 
-## Example earnings messages
+### /takerolefromchannel
+Removes a selected role from all users mentioned in a selected channel. Checks who does not have the role.
+
+### /earningsroles
+Reads messages like:
 
 ```txt
-@Player1 250
-@Player2 $1,500
-@Player3 5k
+@Player 12500
+@Player2 $20,000
+@Player3 12.5k
 ```
 
-## Setup
+It removes old configured earnings roles and applies the correct one.
 
-1. Upload all files to GitHub.
-2. Rename `.env.example` to `.env` locally if testing on your PC.
-3. Add your real values:
+### /checktwitchsignins
+Compares Twitch links from one channel with Twitch links in a sign-ins channel.
+
+It reports:
+
+- Twitch links found
+- Who is missing from sign-ins
+- Who is live now
+- Who has a recent Twitch archive/VOD in the selected hour window
+- Who has no current live stream or recent VOD
+
+Example supported Twitch link formats:
+
+```txt
+https://www.twitch.tv/fieb
+www.twitch.tv/fieb
+twitch.tv/fieb
+```
+
+## Render Environment Variables
 
 ```env
-TOKEN=YOUR_DISCORD_BOT_TOKEN
-CLIENT_ID=YOUR_APPLICATION_CLIENT_ID
-GUILD_ID=YOUR_DISCORD_SERVER_ID
+TOKEN=your_discord_bot_token
+CLIENT_ID=your_discord_application_id
+GUILD_ID=your_discord_server_id
+TWITCH_CLIENT_ID=your_twitch_client_id
+TWITCH_CLIENT_SECRET=your_twitch_client_secret
 ```
 
-4. Edit `config.json` and replace the earnings role IDs with your real Discord role IDs.
+## Twitch API setup
 
-## Render setup
+1. Go to Twitch Developer Console.
+2. Create an application.
+3. Set OAuth Redirect URL to `http://localhost`.
+4. Category: Application Integration.
+5. Copy Client ID and create/copy Client Secret.
+6. Add both to Render Environment Variables.
 
-Use these settings:
+## Render
 
-- Runtime: Node
-- Build Command: `npm install`
-- Start Command: `npm start`
+Use a Background Worker.
 
-Add these environment variables in Render:
-
-- `TOKEN`
-- `CLIENT_ID`
-- `GUILD_ID`
-
-## Important Discord settings
-
-In the Discord Developer Portal, enable:
-
-- Server Members Intent
-- Message Content Intent
-
-The bot role must be above all roles it should give or remove.
-
-
-## V2 Update
-
-- `/giverolefromchannel` checks first if a member already has the selected role.
-- `/takerolefromchannel` checks first if a member does not have the selected role.
-- `/earningsroles` updates earnings roles intelligently:
-  - removes old earnings roles only when needed
-  - adds the correct new earnings role
-  - skips users who already have the correct earnings role
-
-Example result:
+Build command:
 
 ```txt
-Done.
-Role: @Role
-Users found: 10
-Newly added: 6
-Already had role: 4
-Failed: 0
+npm install
 ```
+
+Start command:
+
+```txt
+npm start
+```
+
+## Important
+
+The Twitch check can verify current live status and recent VOD/archive status. Twitch does not always keep VODs if streamers disabled archives, so a player can have streamed but still appear as no recent VOD.
