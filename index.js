@@ -1,4 +1,4 @@
-require("dotenv").config();
+require('dotenv').config();
 
 const {
   Client,
@@ -7,17 +7,21 @@ const {
   REST,
   Routes,
   PermissionFlagsBits,
-  ChannelType
-} = require("discord.js");
+  ChannelType,
+  MessageFlags
+} = require('discord.js');
 
-const config = require("./config.json");
+const config = require('./config.json');
 
-const requiredEnv = ["TOKEN", "CLIENT_ID", "GUILD_ID"];
-for (const key of requiredEnv) {
-  if (!process.env[key]) {
-    console.error(`Missing required environment variable: ${key}`);
-    process.exit(1);
-  }
+const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID;
+const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID;
+const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET;
+
+if (!TOKEN || !CLIENT_ID || !GUILD_ID) {
+  console.error('Missing TOKEN, CLIENT_ID or GUILD_ID in environment variables.');
+  process.exit(1);
 }
 
 const client = new Client({
@@ -29,710 +33,393 @@ const client = new Client({
   ]
 });
 
+const textChannelOption = option => option
+  .setName('channel')
+  .setDescription('Channel to scan')
+  .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+  .setRequired(true);
+
 const commands = [
   new SlashCommandBuilder()
-    .setName("giverolefromchannel")
-    .setDescription("Gives a role to everyone mentioned in a selected channel.")
-    .addChannelOption(option => option.setName("channel").setDescription("Channel to scan").setRequired(true))
-    .addRoleOption(option => option.setName("role").setDescription("Role to give").setRequired(true))
-    .addIntegerOption(option => option.setName("limit").setDescription("How many messages to scan, max 100").setRequired(false))
+    .setName('giverolefromchannel')
+    .setDescription('Gives a role to everyone mentioned in a selected channel.')
+    .addChannelOption(textChannelOption)
+    .addRoleOption(option => option.setName('role').setDescription('Role to give').setRequired(true))
+    .addIntegerOption(option => option.setName('limit').setDescription('Messages to scan, max 100').setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
   new SlashCommandBuilder()
-    .setName("takerolefromchannel")
-    .setDescription("Removes a role from everyone mentioned in a selected channel.")
-    .addChannelOption(option => option.setName("channel").setDescription("Channel to scan").setRequired(true))
-    .addRoleOption(option => option.setName("role").setDescription("Role to remove").setRequired(true))
-    .addIntegerOption(option => option.setName("limit").setDescription("How many messages to scan, max 100").setRequired(false))
+    .setName('takerolefromchannel')
+    .setDescription('Removes a role from everyone mentioned in a selected channel.')
+    .addChannelOption(textChannelOption)
+    .addRoleOption(option => option.setName('role').setDescription('Role to remove').setRequired(true))
+    .addIntegerOption(option => option.setName('limit').setDescription('Messages to scan, max 100').setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
   new SlashCommandBuilder()
-    .setName("earningsroles")
-    .setDescription("Updates earnings roles based on mentions and earnings numbers in a channel.")
-    .addChannelOption(option => option.setName("channel").setDescription("Channel to scan").setRequired(true))
-    .addIntegerOption(option => option.setName("limit").setDescription("How many messages to scan, max 100").setRequired(false))
+    .setName('earningsroles')
+    .setDescription('Updates earnings roles based on mentions and earnings numbers in a channel.')
+    .addChannelOption(textChannelOption)
+    .addIntegerOption(option => option.setName('limit').setDescription('Messages to scan, max 100').setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
   new SlashCommandBuilder()
-    .setName("checksignup")
-    .setDescription("Pre-cup check: compares sign-ins with Twitch links.")
-    .addChannelOption(option =>
-      option
-        .setName("signins_channel")
-        .setDescription("Channel containing the sign-ins")
-        .setRequired(true)
-    )
-    .addChannelOption(option =>
-      option
-        .setName("twitch_channel")
-        .setDescription("Channel containing the Twitch links")
-        .setRequired(true)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName("limit")
-        .setDescription("How many messages per channel to scan, max 100")
-        .setRequired(false)
-    )
+    .setName('checksignup')
+    .setDescription('Before cup: checks if sign-ins have Twitch links and compares with Twitch link channel.')
+    .addChannelOption(option => option
+      .setName('signin_channel')
+      .setDescription('Channel with sign-ins / Discord mentions')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .addChannelOption(option => option
+      .setName('twitch_channel')
+      .setDescription('Channel with Twitch links')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .addIntegerOption(option => option.setName('limit').setDescription('Messages to scan per channel, max 100').setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
   new SlashCommandBuilder()
-    .setName("checkstreamproof")
-    .setDescription("After-cup check: checks who is live or has a recent Twitch VOD.")
-    .addChannelOption(option =>
-      option
-        .setName("twitch_channel")
-        .setDescription("Channel containing the Twitch links")
-        .setRequired(true)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName("hours")
-        .setDescription("Recent stream/VOD check window in hours, default 24")
-        .setRequired(false)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName("limit")
-        .setDescription("How many messages to scan, max 100")
-        .setRequired(false)
-    )
-    .addChannelOption(option =>
-      option
-        .setName("signins_channel")
-        .setDescription("Optional: only check Twitch links from signed-in players")
-        .setRequired(false)
-    )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
-
-  new SlashCommandBuilder()
-    .setName("checktwitchsignins")
-    .setDescription("Legacy: combined Twitch sign-in and stream proof check.")
-    .addChannelOption(option =>
-      option
-        .setName("twitch_channel")
-        .setDescription("Channel containing the Twitch links to check")
-        .setRequired(true)
-    )
-    .addChannelOption(option =>
-      option
-        .setName("signins_channel")
-        .setDescription("Channel containing the sign-ins")
-        .setRequired(true)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName("limit")
-        .setDescription("How many messages per channel to scan, max 100")
-        .setRequired(false)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName("hours")
-        .setDescription("Recent stream/VOD check window in hours, default 24")
-        .setRequired(false)
-    )
+    .setName('checkstreamproof')
+    .setDescription('After cup: checks Twitch links for live status or recent VODs.')
+    .addChannelOption(option => option
+      .setName('twitch_channel')
+      .setDescription('Channel with Twitch links')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .addIntegerOption(option => option.setName('hours').setDescription('How many hours back to check VODs. Default 24').setRequired(false))
+    .addIntegerOption(option => option.setName('limit').setDescription('Messages to scan, max 100').setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
 ].map(command => command.toJSON());
 
-const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 async function registerCommands() {
-  try {
-    await rest.put(
-      Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-      { body: commands }
-    );
-    console.log("Slash commands registered.");
-  } catch (error) {
-    console.error("Failed to register slash commands:", error);
+  await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
+  console.log('Slash commands registered.');
+}
+
+function normalizeTwitchName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/^@/, '')
+    .replace(/[^a-z0-9_]/g, '')
+    .trim();
+}
+
+function extractTwitchLinks(content) {
+  const found = new Set();
+  const regex = /(?:https?:\/\/)?(?:www\.)?twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#\s]|$)/gi;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    const name = normalizeTwitchName(match[1]);
+    if (name && !['directory', 'videos', 'settings'].includes(name)) found.add(name);
   }
+  return [...found];
 }
 
-function isTextChannel(channel) {
-  return channel && [
-    ChannelType.GuildText,
-    ChannelType.GuildAnnouncement,
-    ChannelType.PublicThread,
-    ChannelType.PrivateThread
-  ].includes(channel.type);
-}
-
-async function fetchMessages(channel, limit) {
-  if (!isTextChannel(channel)) throw new Error("Please select a text channel.");
-  return channel.messages.fetch({ limit: Math.min(Math.max(limit || 100, 1), 100) });
-}
-
-function collectMentionedUserIds(messages) {
-  const userIds = new Set();
-  for (const message of messages.values()) {
-    for (const user of message.mentions.users.values()) userIds.add(user.id);
-  }
-  return userIds;
-}
-
-function parseMoneyNumber(raw) {
-  if (!raw) return null;
-  let value = String(raw).trim().toLowerCase().replace(/[$€£]/g, "").replace(/\s/g, "");
-  let multiplier = 1;
-  if (value.endsWith("k")) {
-    multiplier = 1000;
-    value = value.slice(0, -1);
-  }
-  value = value.replace(/,/g, "");
-  const number = Number(value);
-  if (Number.isNaN(number)) return null;
-  return Math.floor(number * multiplier);
+async function fetchMessages(channel, limit = 100) {
+  const messages = await channel.messages.fetch({ limit: Math.min(Math.max(limit, 1), 100) });
+  return [...messages.values()].reverse();
 }
 
 function extractEarningsAfterMention(content, userId) {
-  const regex = new RegExp(`<@!?${userId}>\\s*[$€£]?\\s*([0-9][0-9.,]*\\s*k?)`, "i");
-  const match = content.match(regex);
+  const mentionRegex = new RegExp(`<@!?${userId}>\\s*\\$?([\\d.,]+)`, 'i');
+  const match = content.match(mentionRegex);
   if (!match) return null;
-  return parseMoneyNumber(match[1]);
+  const cleaned = match[1].replace(/,/g, '').replace(/\./g, '');
+  const earnings = parseInt(cleaned, 10);
+  return Number.isNaN(earnings) ? null : earnings;
 }
 
 function getEarningsRole(earnings) {
   const sortedRoles = [...config.earningsRoles].sort((a, b) => b.min - a.min);
-  return sortedRoles.find(role => earnings >= role.min) || null;
+  return sortedRoles.find(role => earnings >= role.min);
 }
 
-function getAllEarningsRoleIds() {
-  return config.earningsRoles.map(role => role.roleId).filter(Boolean);
-}
+function chunkLines(title, lines, maxLength = 1850) {
+  const chunks = [];
+  let current = title ? `${title}\n` : '';
 
-async function giveOrTakeRoleFromChannel(interaction, mode) {
-  await interaction.deferReply({ ephemeral: true });
-  const channel = interaction.options.getChannel("channel");
-  const role = interaction.options.getRole("role");
-  const limit = interaction.options.getInteger("limit") || 100;
-
-  try {
-    const messages = await fetchMessages(channel, limit);
-    const userIds = collectMentionedUserIds(messages);
-    let added = 0, removed = 0, alreadyHad = 0, didNotHave = 0, failed = 0;
-
-    for (const userId of userIds) {
-      try {
-        const member = await interaction.guild.members.fetch(userId);
-        const hasRole = member.roles.cache.has(role.id);
-        if (mode === "give") {
-          if (hasRole) { alreadyHad++; continue; }
-          await member.roles.add(role);
-          added++;
-        } else {
-          if (!hasRole) { didNotHave++; continue; }
-          await member.roles.remove(role);
-          removed++;
-        }
-      } catch (error) {
-        console.error(`Failed to ${mode} role for ${userId}:`, error.message);
-        failed++;
-      }
-    }
-
-    if (mode === "give") {
-      return interaction.editReply(`Done.\nRole: ${role}\nUsers found: ${userIds.size}\nNewly added: ${added}\nAlready had role: ${alreadyHad}\nFailed: ${failed}`);
-    }
-    return interaction.editReply(`Done.\nRole: ${role}\nUsers found: ${userIds.size}\nRemoved: ${removed}\nDid not have role: ${didNotHave}\nFailed: ${failed}`);
-  } catch (error) {
-    return interaction.editReply(`Error: ${error.message}`);
-  }
-}
-
-async function updateEarningsRoles(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-  const channel = interaction.options.getChannel("channel");
-  const limit = interaction.options.getInteger("limit") || 100;
-  const allEarningsRoleIds = getAllEarningsRoleIds();
-  if (!allEarningsRoleIds.length) return interaction.editReply("No earnings roles are configured in config.json.");
-
-  try {
-    const messages = await fetchMessages(channel, limit);
-    const latestByUser = new Map();
-    const sortedMessages = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-    for (const message of sortedMessages) {
-      for (const user of message.mentions.users.values()) {
-        const earnings = extractEarningsAfterMention(message.content, user.id);
-        if (earnings === null) continue;
-        latestByUser.set(user.id, { userId: user.id, earnings });
-      }
-    }
-
-    let updated = 0, unchanged = 0, skipped = 0, failed = 0;
-    for (const entry of latestByUser.values()) {
-      const roleData = getEarningsRole(entry.earnings);
-      if (!roleData) { skipped++; continue; }
-      try {
-        const member = await interaction.guild.members.fetch(entry.userId);
-        const currentEarningsRoles = allEarningsRoleIds.filter(roleId => member.roles.cache.has(roleId));
-        const alreadyCorrect = currentEarningsRoles.length === 1 && currentEarningsRoles[0] === roleData.roleId;
-        if (alreadyCorrect) { unchanged++; continue; }
-        const rolesToRemove = currentEarningsRoles.filter(roleId => roleId !== roleData.roleId);
-        if (rolesToRemove.length) await member.roles.remove(rolesToRemove);
-        if (!member.roles.cache.has(roleData.roleId)) await member.roles.add(roleData.roleId);
-        updated++;
-      } catch (error) {
-        console.error(`Failed to update earnings role for ${entry.userId}:`, error.message);
-        failed++;
-      }
-    }
-
-    return interaction.editReply(`Done.\nUsers with earnings found: ${latestByUser.size}\nUpdated: ${updated}\nAlready correct: ${unchanged}\nSkipped: ${skipped}\nFailed: ${failed}`);
-  } catch (error) {
-    return interaction.editReply(`Error: ${error.message}`);
-  }
-}
-
-function normalizeTwitchName(name) {
-  return String(name || "").trim().toLowerCase().replace(/^@/, "");
-}
-
-function extractTwitchNames(text) {
-  const names = new Set();
-  const patterns = [
-    /(?:https?:\/\/)?(?:www\.)?twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#\s]|$)/gi,
-    /(?:^|\s)twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#\s]|$)/gi
-  ];
-
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(text)) !== null) {
-      const username = normalizeTwitchName(match[1]);
-      if (!["directory", "videos", "settings", "p", "downloads", "jobs"].includes(username)) {
-        names.add(username);
-      }
+  for (const line of lines) {
+    const next = current + line + '\n';
+    if (next.length > maxLength) {
+      chunks.push(current.trim());
+      current = line + '\n';
+    } else {
+      current = next;
     }
   }
 
-  return [...names];
+  if (current.trim()) chunks.push(current.trim());
+  return chunks;
 }
 
-function collectTwitchNamesFromMessages(messages) {
-  const result = new Map();
-  const sortedMessages = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-  for (const message of sortedMessages) {
-    const twitchNames = extractTwitchNames(message.content);
-    for (const twitchName of twitchNames) {
-      if (!result.has(twitchName)) {
-        result.set(twitchName, {
-          twitchName,
-          messageUrl: message.url,
-          authorTag: message.author?.tag || "unknown"
-        });
-      }
-    }
+async function replyLong(interaction, title, lines) {
+  const chunks = chunkLines(title, lines);
+  if (chunks.length === 0) return interaction.editReply('No result.');
+  await interaction.editReply(chunks[0]);
+  for (let i = 1; i < chunks.length; i++) {
+    await interaction.followUp({ content: chunks[i], flags: MessageFlags.Ephemeral });
   }
-
-  return result;
 }
-
-function collectSignupData(messages) {
-  const users = new Map();
-  const twitchNames = new Set();
-  const sortedMessages = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-  for (const message of sortedMessages) {
-    const names = extractTwitchNames(message.content);
-    for (const name of names) twitchNames.add(name);
-
-    for (const user of message.mentions.users.values()) {
-      if (!users.has(user.id)) {
-        users.set(user.id, {
-          userId: user.id,
-          mention: `<@${user.id}>`,
-          tag: user.tag,
-          twitchNames: new Set(),
-          messageUrl: message.url
-        });
-      }
-      const entry = users.get(user.id);
-      for (const name of names) entry.twitchNames.add(name);
-    }
-  }
-
-  return { users, twitchNames };
-}
-
-function collectTwitchLinkData(messages) {
-  const entries = [];
-  const byName = new Map();
-  const byMentionedUser = new Map();
-  const sortedMessages = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-  for (const message of sortedMessages) {
-    const twitchNames = extractTwitchNames(message.content);
-    if (!twitchNames.length) continue;
-
-    const mentionedUserIds = [...message.mentions.users.keys()];
-    for (const twitchName of twitchNames) {
-      const entry = {
-        twitchName,
-        mentionedUserIds,
-        authorId: message.author?.id || null,
-        authorTag: message.author?.tag || "unknown",
-        messageUrl: message.url
-      };
-      entries.push(entry);
-      if (!byName.has(twitchName)) byName.set(twitchName, entry);
-      for (const userId of mentionedUserIds) {
-        if (!byMentionedUser.has(userId)) byMentionedUser.set(userId, []);
-        byMentionedUser.get(userId).push(entry);
-      }
-    }
-  }
-
-  return { entries, byName, byMentionedUser };
-}
-
-function uniqueTwitchNamesFromEntries(entries) {
-  return [...new Set(entries.map(entry => entry.twitchName))].sort();
-}
-
-let twitchTokenCache = { token: null, expiresAt: 0 };
 
 async function getTwitchToken() {
-  if (!process.env.TWITCH_CLIENT_ID || !process.env.TWITCH_CLIENT_SECRET) {
-    throw new Error("Missing TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET in Render Environment Variables.");
-  }
+  if (!TWITCH_CLIENT_ID || !TWITCH_CLIENT_SECRET) throw new Error('Missing Twitch API credentials.');
 
-  if (twitchTokenCache.token && Date.now() < twitchTokenCache.expiresAt) {
-    return twitchTokenCache.token;
-  }
-
-  const params = new URLSearchParams({
-    client_id: process.env.TWITCH_CLIENT_ID,
-    client_secret: process.env.TWITCH_CLIENT_SECRET,
-    grant_type: "client_credentials"
+  const res = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${TWITCH_CLIENT_ID}&client_secret=${TWITCH_CLIENT_SECRET}&grant_type=client_credentials`, {
+    method: 'POST'
   });
 
-  const response = await fetch(`https://id.twitch.tv/oauth2/token?${params.toString()}`, {
-    method: "POST"
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Twitch auth failed: ${response.status} ${body}`);
-  }
-
-  const data = await response.json();
-  twitchTokenCache = {
-    token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - 120) * 1000
-  };
-  return twitchTokenCache.token;
+  if (!res.ok) throw new Error(`Twitch token failed: ${res.status}`);
+  const data = await res.json();
+  return data.access_token;
 }
 
-async function twitchApi(path) {
-  const token = await getTwitchToken();
-  const response = await fetch(`https://api.twitch.tv/helix${path}`, {
+async function twitchApi(path, token) {
+  const res = await fetch(`https://api.twitch.tv/helix${path}`, {
     headers: {
-      "Client-ID": process.env.TWITCH_CLIENT_ID,
-      "Authorization": `Bearer ${token}`
+      'Client-ID': TWITCH_CLIENT_ID,
+      Authorization: `Bearer ${token}`
     }
   });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Twitch API failed: ${response.status} ${body}`);
-  }
-
-  return response.json();
+  if (!res.ok) throw new Error(`Twitch API failed: ${res.status}`);
+  return res.json();
 }
 
-async function getTwitchUsersByLogin(logins) {
-  const users = new Map();
-  const chunks = [];
-  for (let i = 0; i < logins.length; i += 100) chunks.push(logins.slice(i, i + 100));
+async function checkTwitchUsers(usernames, hours) {
+  const token = await getTwitchToken();
+  const unique = [...new Set(usernames.map(normalizeTwitchName).filter(Boolean))];
+  const results = new Map();
+  if (unique.length === 0) return results;
 
-  for (const chunk of chunks) {
-    const query = chunk.map(login => `login=${encodeURIComponent(login)}`).join("&");
-    const data = await twitchApi(`/users?${query}`);
-    for (const user of data.data || []) users.set(normalizeTwitchName(user.login), user);
-  }
+  for (let i = 0; i < unique.length; i += 100) {
+    const batch = unique.slice(i, i + 100);
+    const loginQuery = batch.map(name => `login=${encodeURIComponent(name)}`).join('&');
+    const usersData = await twitchApi(`/users?${loginQuery}`, token);
 
-  return users;
-}
-
-async function getLiveStreamsByLogin(logins) {
-  const streams = new Map();
-  const chunks = [];
-  for (let i = 0; i < logins.length; i += 100) chunks.push(logins.slice(i, i + 100));
-
-  for (const chunk of chunks) {
-    const query = chunk.map(login => `user_login=${encodeURIComponent(login)}`).join("&");
-    const data = await twitchApi(`/streams?${query}`);
-    for (const stream of data.data || []) streams.set(normalizeTwitchName(stream.user_login), stream);
-  }
-
-  return streams;
-}
-
-async function getRecentVideoForUser(userId, hours) {
-  const data = await twitchApi(`/videos?user_id=${encodeURIComponent(userId)}&type=archive&first=5`);
-  const cutoff = Date.now() - hours * 60 * 60 * 1000;
-  const videos = data.data || [];
-  return videos.find(video => new Date(video.created_at).getTime() >= cutoff) || null;
-}
-
-function shortenList(items, max = 20) {
-  if (!items.length) return "None";
-  const visible = items.slice(0, max);
-  const extra = items.length - visible.length;
-  return visible.join("\n") + (extra > 0 ? `\n...and ${extra} more` : "");
-}
-
-async function checkSignup(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-
-  const signinsChannel = interaction.options.getChannel("signins_channel");
-  const twitchChannel = interaction.options.getChannel("twitch_channel");
-  const limit = interaction.options.getInteger("limit") || 100;
-
-  try {
-    const [signinMessages, twitchMessages] = await Promise.all([
-      fetchMessages(signinsChannel, limit),
-      fetchMessages(twitchChannel, limit)
-    ]);
-
-    const signup = collectSignupData(signinMessages);
-    const twitch = collectTwitchLinkData(twitchMessages);
-
-    const signedUserIds = [...signup.users.keys()];
-    const twitchNames = uniqueTwitchNamesFromEntries(twitch.entries);
-
-    if (!signedUserIds.length && !signup.twitchNames.size) {
-      return interaction.editReply("No sign-ins found. I need Discord mentions in the sign-in channel, or Twitch links there too.");
+    const loginToUser = new Map();
+    for (const user of usersData.data || []) {
+      loginToUser.set(user.login.toLowerCase(), user);
     }
 
-    if (!twitch.entries.length) {
-      return interaction.editReply("No Twitch links found in the selected Twitch channel.");
+    const idQuery = [...loginToUser.values()].map(user => `user_id=${encodeURIComponent(user.id)}`).join('&');
+    const liveSet = new Set();
+    if (idQuery) {
+      const streamsData = await twitchApi(`/streams?${idQuery}`, token);
+      for (const stream of streamsData.data || []) liveSet.add(stream.user_login.toLowerCase());
     }
 
-    const missingTwitchLinks = [];
-    const signedWithTwitch = [];
+    const cutoff = Date.now() - hours * 60 * 60 * 1000;
 
-    if (signedUserIds.length) {
-      for (const userId of signedUserIds) {
-        const signupEntry = signup.users.get(userId);
-        const linksForUser = twitch.byMentionedUser.get(userId) || [];
-        const signupTwitchMatch = [...signupEntry.twitchNames].some(name => twitch.byName.has(name));
-
-        if (linksForUser.length || signupTwitchMatch) {
-          const names = linksForUser.map(e => e.twitchName).concat([...signupEntry.twitchNames].filter(name => twitch.byName.has(name)));
-          signedWithTwitch.push(`${signupEntry.mention}${names.length ? ` → ${[...new Set(names)].join(", ")}` : ""}`);
-        } else {
-          missingTwitchLinks.push(`❌ ${signupEntry.mention}`);
-        }
-      }
-    }
-
-    const extraTwitchLinks = [];
-    for (const entry of twitch.entries) {
-      const hasSignedMention = entry.mentionedUserIds.some(userId => signup.users.has(userId));
-      const twitchNameInSignin = signup.twitchNames.has(entry.twitchName);
-      if (!hasSignedMention && !twitchNameInSignin) {
-        extraTwitchLinks.push(`⚠️ ${entry.twitchName}${entry.mentionedUserIds.length ? ` (${entry.mentionedUserIds.map(id => `<@${id}>`).join(", ")})` : ""}`);
-      }
-    }
-
-    const response = [
-      "Pre-Cup Signup Check",
-      `Sign-ins found: ${signedUserIds.length || signup.twitchNames.size}`,
-      `Twitch links found: ${twitchNames.length}`,
-      `Sign-ins with Twitch link: ${signedUserIds.length ? signedWithTwitch.length : "checked by Twitch names"}`,
-      `Missing Twitch link: ${missingTwitchLinks.length}`,
-      `Extra Twitch links without sign-in: ${extraTwitchLinks.length}`,
-      "",
-      `Missing Twitch Links:\n${shortenList(missingTwitchLinks, 30)}`,
-      "",
-      `Extra Twitch Links without Sign-In:\n${shortenList(extraTwitchLinks, 30)}`
-    ].join("\n");
-
-    return interaction.editReply(response.slice(0, 1900));
-  } catch (error) {
-    console.error("checksignup failed:", error);
-    return interaction.editReply(`Error: ${error.message}`);
-  }
-}
-
-async function checkStreamProof(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-
-  const twitchChannel = interaction.options.getChannel("twitch_channel");
-  const signinsChannel = interaction.options.getChannel("signins_channel");
-  const limit = interaction.options.getInteger("limit") || 100;
-  const hours = interaction.options.getInteger("hours") || 24;
-
-  try {
-    const twitchMessages = await fetchMessages(twitchChannel, limit);
-    const twitch = collectTwitchLinkData(twitchMessages);
-    let entriesToCheck = twitch.entries;
-
-    if (signinsChannel) {
-      const signinMessages = await fetchMessages(signinsChannel, limit);
-      const signup = collectSignupData(signinMessages);
-      entriesToCheck = twitch.entries.filter(entry => {
-        const hasSignedMention = entry.mentionedUserIds.some(userId => signup.users.has(userId));
-        const twitchNameInSignin = signup.twitchNames.has(entry.twitchName);
-        return hasSignedMention || twitchNameInSignin;
-      });
-    }
-
-    const twitchNames = uniqueTwitchNamesFromEntries(entriesToCheck);
-    if (!twitchNames.length) {
-      return interaction.editReply("No Twitch links found to check. If you used signins_channel, no signed-in Twitch links were matched.");
-    }
-
-    const usersByLogin = await getTwitchUsersByLogin(twitchNames);
-    const liveByLogin = await getLiveStreamsByLogin(twitchNames);
-
-    const liveNow = [];
-    const recentVod = [];
-    const noProof = [];
-    const unknownAccounts = [];
-
-    for (const name of twitchNames) {
-      const user = usersByLogin.get(name);
+    for (const name of batch) {
+      const user = loginToUser.get(name);
       if (!user) {
-        unknownAccounts.push(`⚠️ ${name}`);
+        results.set(name, { status: 'not_found' });
         continue;
       }
 
-      const live = liveByLogin.get(name);
-      if (live) {
-        liveNow.push(`🟢 ${name} — LIVE now`);
+      if (liveSet.has(name)) {
+        results.set(name, { status: 'live' });
         continue;
       }
 
-      const recentVideo = await getRecentVideoForUser(user.id, hours);
-      if (recentVideo) {
-        recentVod.push(`🟡 ${name} — VOD found`);
-      } else {
-        noProof.push(`🔴 ${name}`);
-      }
+      const videos = await twitchApi(`/videos?user_id=${encodeURIComponent(user.id)}&type=archive&first=5`, token);
+      const recentVod = (videos.data || []).find(video => new Date(video.created_at).getTime() >= cutoff);
+      results.set(name, { status: recentVod ? 'vod' : 'none', vodUrl: recentVod?.url });
     }
-
-    const response = [
-      "After-Cup Stream Proof Check",
-      `Twitch channels checked: ${twitchNames.length}`,
-      `Live now: ${liveNow.length}`,
-      `Recent VOD in last ${hours}h: ${recentVod.length}`,
-      `No live/recent VOD found: ${noProof.length}`,
-      "",
-      `Live now:\n${shortenList(liveNow, 25)}`,
-      "",
-      `Recent VOD found:\n${shortenList(recentVod, 25)}`,
-      "",
-      `No Stream Proof:\n${shortenList(noProof, 30)}`,
-      unknownAccounts.length ? `\nUnknown Twitch accounts:\n${shortenList(unknownAccounts, 20)}` : ""
-    ].filter(Boolean).join("\n");
-
-    return interaction.editReply(response.slice(0, 1900));
-  } catch (error) {
-    console.error("checkstreamproof failed:", error);
-    return interaction.editReply(`Error: ${error.message}`);
   }
+
+  return results;
 }
 
-async function checkTwitchSignins(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-
-  const twitchChannel = interaction.options.getChannel("twitch_channel");
-  const signinsChannel = interaction.options.getChannel("signins_channel");
-  const limit = interaction.options.getInteger("limit") || 100;
-  const hours = interaction.options.getInteger("hours") || 24;
-
-  try {
-    const [twitchMessages, signinsMessages] = await Promise.all([
-      fetchMessages(twitchChannel, limit),
-      fetchMessages(signinsChannel, limit)
-    ]);
-
-    const twitchEntries = collectTwitchNamesFromMessages(twitchMessages);
-    const signinEntries = collectTwitchNamesFromMessages(signinsMessages);
-
-    const twitchNames = [...twitchEntries.keys()].sort();
-    const signinNames = new Set([...signinEntries.keys()]);
-
-    if (!twitchNames.length) {
-      return interaction.editReply("No Twitch links found in the selected Twitch channel.");
-    }
-
-    const missingFromSignins = twitchNames.filter(name => !signinNames.has(name));
-    const matched = twitchNames.filter(name => signinNames.has(name));
-
-    const usersByLogin = await getTwitchUsersByLogin(twitchNames);
-    const liveByLogin = await getLiveStreamsByLogin(twitchNames);
-
-    const unknownAccounts = twitchNames.filter(name => !usersByLogin.has(name));
-    const offlineNoRecent = [];
-    const streamedRecent = [];
-    const liveNow = [];
-
-    for (const name of twitchNames) {
-      const user = usersByLogin.get(name);
-      if (!user) continue;
-
-      const live = liveByLogin.get(name);
-      if (live) {
-        liveNow.push(`🟢 ${name} — LIVE now`);
-        streamedRecent.push(name);
-        continue;
-      }
-
-      const recentVideo = await getRecentVideoForUser(user.id, hours);
-      if (recentVideo) {
-        streamedRecent.push(name);
-      } else {
-        offlineNoRecent.push(`🔴 ${name}`);
-      }
-    }
-
-    const response = [
-      `Twitch Sign-In Check`,
-      `Twitch links found: ${twitchNames.length}`,
-      `Found in sign-ins: ${matched.length}`,
-      `Missing from sign-ins: ${missingFromSignins.length}`,
-      `Live now: ${liveNow.length}`,
-      `Streamed/VOD in last ${hours}h: ${streamedRecent.length}`,
-      `No live/recent VOD found: ${offlineNoRecent.length}`,
-      "",
-      `Missing from sign-ins:\n${shortenList(missingFromSignins.map(n => `❌ ${n}`), 25)}`,
-      "",
-      `Live now:\n${shortenList(liveNow, 15)}`,
-      "",
-      `No live/recent VOD found:\n${shortenList(offlineNoRecent, 25)}`,
-      unknownAccounts.length ? `\nUnknown Twitch accounts:\n${shortenList(unknownAccounts.map(n => `⚠️ ${n}`), 15)}` : ""
-    ].filter(Boolean).join("\n");
-
-    return interaction.editReply(response.slice(0, 1900));
-  } catch (error) {
-    console.error("checktwitchsignins failed:", error);
-    return interaction.editReply(`Error: ${error.message}`);
-  }
-}
-
-client.once("ready", () => {
+client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-client.on("interactionCreate", async interaction => {
+client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
-    return interaction.reply({ content: "You need Manage Roles permission to use this command.", ephemeral: true });
+    return interaction.reply({ content: 'You need Manage Roles permission to use this command.', flags: MessageFlags.Ephemeral });
   }
 
-  if (interaction.commandName === "giverolefromchannel") return giveOrTakeRoleFromChannel(interaction, "give");
-  if (interaction.commandName === "takerolefromchannel") return giveOrTakeRoleFromChannel(interaction, "take");
-  if (interaction.commandName === "earningsroles") return updateEarningsRoles(interaction);
-  if (interaction.commandName === "checksignup") return checkSignup(interaction);
-  if (interaction.commandName === "checkstreamproof") return checkStreamProof(interaction);
-  if (interaction.commandName === "checktwitchsignins") return checkTwitchSignins(interaction);
+  try {
+    if (interaction.commandName === 'giverolefromchannel') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const channel = interaction.options.getChannel('channel');
+      const role = interaction.options.getRole('role');
+      const limit = interaction.options.getInteger('limit') || 100;
+      const messages = await fetchMessages(channel, limit);
+      const userIds = new Set();
+      for (const message of messages) for (const user of message.mentions.users.values()) userIds.add(user.id);
+
+      let added = 0, already = 0, failed = 0;
+      for (const userId of userIds) {
+        try {
+          const member = await interaction.guild.members.fetch(userId);
+          if (member.roles.cache.has(role.id)) already++;
+          else { await member.roles.add(role); added++; }
+        } catch { failed++; }
+      }
+      return interaction.editReply(`Success\nRole: ${role}\nUsers found: ${userIds.size}\nNewly added: ${added}\nAlready had role: ${already}\nFailed: ${failed}`);
+    }
+
+    if (interaction.commandName === 'takerolefromchannel') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const channel = interaction.options.getChannel('channel');
+      const role = interaction.options.getRole('role');
+      const limit = interaction.options.getInteger('limit') || 100;
+      const messages = await fetchMessages(channel, limit);
+      const userIds = new Set();
+      for (const message of messages) for (const user of message.mentions.users.values()) userIds.add(user.id);
+
+      let removed = 0, didNotHave = 0, failed = 0;
+      for (const userId of userIds) {
+        try {
+          const member = await interaction.guild.members.fetch(userId);
+          if (!member.roles.cache.has(role.id)) didNotHave++;
+          else { await member.roles.remove(role); removed++; }
+        } catch { failed++; }
+      }
+      return interaction.editReply(`Success\nRole: ${role}\nUsers found: ${userIds.size}\nRemoved: ${removed}\nDid not have role: ${didNotHave}\nFailed: ${failed}`);
+    }
+
+    if (interaction.commandName === 'earningsroles') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const channel = interaction.options.getChannel('channel');
+      const limit = interaction.options.getInteger('limit') || 100;
+      const messages = await fetchMessages(channel, limit);
+      const allEarningsRoleIds = config.earningsRoles.map(r => r.roleId);
+
+      let updated = 0, alreadyCorrect = 0, skipped = 0, failed = 0;
+      for (const message of messages) {
+        for (const user of message.mentions.users.values()) {
+          const earnings = extractEarningsAfterMention(message.content, user.id);
+          if (earnings === null) { skipped++; continue; }
+          const roleData = getEarningsRole(earnings);
+          if (!roleData) { skipped++; continue; }
+
+          try {
+            const member = await interaction.guild.members.fetch(user.id);
+            const hasCorrect = member.roles.cache.has(roleData.roleId);
+            const hasWrong = allEarningsRoleIds.some(id => id !== roleData.roleId && member.roles.cache.has(id));
+            if (hasCorrect && !hasWrong) { alreadyCorrect++; continue; }
+            await member.roles.remove(allEarningsRoleIds.filter(id => id !== roleData.roleId)).catch(() => {});
+            if (!hasCorrect) await member.roles.add(roleData.roleId);
+            updated++;
+          } catch { failed++; }
+        }
+      }
+
+      return interaction.editReply(`Done.\nUpdated: ${updated}\nAlready correct: ${alreadyCorrect}\nSkipped: ${skipped}\nFailed: ${failed}`);
+    }
+
+    if (interaction.commandName === 'checksignup') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const signinChannel = interaction.options.getChannel('signin_channel');
+      const twitchChannel = interaction.options.getChannel('twitch_channel');
+      const limit = interaction.options.getInteger('limit') || 100;
+
+      const signinMessages = await fetchMessages(signinChannel, limit);
+      const twitchMessages = await fetchMessages(twitchChannel, limit);
+
+      const signedInUsers = new Map();
+      const signinsWithTwitch = new Map();
+      const signinsMissingTwitch = new Map();
+      const twitchLinksInSignins = new Set();
+      const twitchLinksChannel = new Set();
+
+      for (const message of signinMessages) {
+        const links = extractTwitchLinks(message.content);
+        links.forEach(link => twitchLinksInSignins.add(link));
+
+        for (const user of message.mentions.users.values()) {
+          if (user.bot) continue;
+          signedInUsers.set(user.id, user);
+          if (links.length > 0) signinsWithTwitch.set(user.id, { user, links });
+          else signinsMissingTwitch.set(user.id, user);
+        }
+      }
+
+      for (const message of twitchMessages) {
+        extractTwitchLinks(message.content).forEach(link => twitchLinksChannel.add(link));
+      }
+
+      const missingInSignins = [...twitchLinksChannel].filter(link => !twitchLinksInSignins.has(link));
+      const twitchInSignupButNotLinkChannel = [...twitchLinksInSignins].filter(link => !twitchLinksChannel.has(link));
+
+      const lines = [
+        '**Twitch Signup Check**',
+        `Sign-ins found: ${signedInUsers.size}`,
+        `Twitch links in Twitch channel: ${twitchLinksChannel.size}`,
+        `Sign-ins with Twitch link: ${signinsWithTwitch.size}`,
+        `Sign-ins missing Twitch link: ${signinsMissingTwitch.size}`,
+        `Twitch links posted but not inside sign-in messages: ${missingInSignins.length}`,
+        '',
+        '**Sign-ins missing Twitch link:**'
+      ];
+
+      if (signinsMissingTwitch.size === 0) lines.push('✅ None');
+      else for (const user of signinsMissingTwitch.values()) lines.push(`❌ ${user}`);
+
+      lines.push('', '**Twitch links posted but not found in sign-in messages:**');
+      if (missingInSignins.length === 0) lines.push('✅ None');
+      else for (const name of missingInSignins) lines.push(`⚠️ twitch.tv/${name}`);
+
+      lines.push('', '**Twitch links in sign-ins but not posted in Twitch link channel:**');
+      if (twitchInSignupButNotLinkChannel.length === 0) lines.push('✅ None');
+      else for (const name of twitchInSignupButNotLinkChannel) lines.push(`⚠️ twitch.tv/${name}`);
+
+      return replyLong(interaction, '', lines);
+    }
+
+    if (interaction.commandName === 'checkstreamproof') {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const twitchChannel = interaction.options.getChannel('twitch_channel');
+      const hours = interaction.options.getInteger('hours') || 24;
+      const limit = interaction.options.getInteger('limit') || 100;
+      const messages = await fetchMessages(twitchChannel, limit);
+      const usernames = new Set();
+      for (const message of messages) extractTwitchLinks(message.content).forEach(name => usernames.add(name));
+
+      const results = await checkTwitchUsers([...usernames], hours);
+      const live = [], vod = [], none = [], notFound = [];
+
+      for (const name of usernames) {
+        const result = results.get(name);
+        if (!result || result.status === 'none') none.push(name);
+        else if (result.status === 'live') live.push(name);
+        else if (result.status === 'vod') vod.push(name);
+        else if (result.status === 'not_found') notFound.push(name);
+      }
+
+      const lines = [
+        '**Stream Proof Check**',
+        `Twitch links checked: ${usernames.size}`,
+        `Live now: ${live.length}`,
+        `Recent VOD in last ${hours}h: ${vod.length}`,
+        `No proof found: ${none.length}`,
+        `Twitch user not found: ${notFound.length}`,
+        '',
+        '**LIVE NOW:**'
+      ];
+      lines.push(...(live.length ? live.map(n => `🟢 twitch.tv/${n}`) : ['✅ None']));
+      lines.push('', `**Recent VOD found, last ${hours}h:**`);
+      lines.push(...(vod.length ? vod.map(n => `🟡 twitch.tv/${n}`) : ['✅ None']));
+      lines.push('', '**No stream proof found:**');
+      lines.push(...(none.length ? none.map(n => `🔴 twitch.tv/${n}`) : ['✅ None']));
+      lines.push('', '**Twitch user not found:**');
+      lines.push(...(notFound.length ? notFound.map(n => `⚠️ twitch.tv/${n}`) : ['✅ None']));
+
+      return replyLong(interaction, '', lines);
+    }
+  } catch (error) {
+    console.error(error);
+    const message = `Error: ${error.message}`;
+    if (interaction.deferred || interaction.replied) return interaction.editReply(message).catch(() => {});
+    return interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
+  }
 });
 
-registerCommands();
-client.login(process.env.TOKEN);
+registerCommands().then(() => client.login(TOKEN));

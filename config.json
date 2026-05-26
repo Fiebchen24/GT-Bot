@@ -1,24 +1,10 @@
 {
   "earningsRoles": [
-    {
-      "min": 0,
-      "roleId": "ROLE_ID_0_EARNINGS"
-    },
-    {
-      "min": 100,
-      "roleId": "ROLE_ID_100_EARNINGS"
-    },
-    {
-      "min": 500,
-      "roleId": "ROLE_ID_500_EARNINGS"
-    },
-    {
-      "min": 1000,
-      "roleId": "ROLE_ID_1000_EARNINGS"
-    },
-    {
-      "min": 5000,
-      "roleId": "ROLE_ID_5000_EARNINGS"
-    }
+    { "min": 5000, "roleId": "ROLE_ID_5000_10000" },
+    { "min": 10001, "roleId": "ROLE_ID_10001_20000" },
+    { "min": 20001, "roleId": "ROLE_ID_20001_30000" },
+    { "min": 30001, "roleId": "ROLE_ID_30001_40000" },
+    { "min": 40001, "roleId": "ROLE_ID_40001_50000" },
+    { "min": 50001, "roleId": "ROLE_ID_AB_50001" }
   ]
 }
