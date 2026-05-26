@@ -118,71 +118,6 @@ function extractTwitchLinks(content) {
   return [...found];
 }
 
-
-function parseTwitchRegistrations(messages) {
-  const byUserId = new Map();
-  const unassignedLinks = new Set();
-
-  for (const message of messages) {
-    const usersById = message.mentions.users;
-    const lines = String(message.content || '').split(/\r?\n/);
-    let messageHadPairedLine = false;
-
-    for (const line of lines) {
-      const links = extractTwitchLinks(line);
-      if (links.length === 0) continue;
-
-      const mentionIds = [...line.matchAll(/<@!?(\d+)>/g)].map(match => match[1]);
-      const validUsers = mentionIds
-        .map(id => usersById.get(id))
-        .filter(user => user && !user.bot);
-
-      if (validUsers.length === 0) {
-        links.forEach(link => unassignedLinks.add(link));
-        continue;
-      }
-
-      messageHadPairedLine = true;
-      validUsers.forEach((user, index) => {
-        const link = links[index] || links[0];
-        if (!byUserId.has(user.id)) byUserId.set(user.id, { user, links: new Set() });
-        byUserId.get(user.id).links.add(link);
-      });
-    }
-
-    if (!messageHadPairedLine) {
-      const links = extractTwitchLinks(message.content);
-      const validUsers = [...message.mentions.users.values()].filter(user => !user.bot);
-
-      if (links.length > 0 && validUsers.length > 0) {
-        validUsers.forEach((user, index) => {
-          const link = links[index] || links[0];
-          if (!byUserId.has(user.id)) byUserId.set(user.id, { user, links: new Set() });
-          byUserId.get(user.id).links.add(link);
-        });
-      }
-    }
-  }
-
-  return {
-    byUserId,
-    unassignedLinks: [...unassignedLinks]
-  };
-}
-
-function registrationsToTwitchEntries(registrations) {
-  const entries = [];
-  for (const registration of registrations.byUserId.values()) {
-    for (const twitchName of registration.links) {
-      entries.push({ user: registration.user, twitchName });
-    }
-  }
-  for (const twitchName of registrations.unassignedLinks) {
-    entries.push({ user: null, twitchName });
-  }
-  return entries;
-}
-
 async function fetchMessages(channel, limit = 100) {
   const messages = await channel.messages.fetch({ limit: Math.min(Math.max(limit, 1), 100) });
   return [...messages.values()].reverse();
@@ -200,6 +135,45 @@ function extractEarningsAfterMention(content, userId) {
 function getEarningsRole(earnings) {
   const sortedRoles = [...config.earningsRoles].sort((a, b) => b.min - a.min);
   return sortedRoles.find(role => earnings >= role.min);
+}
+
+
+function normalizeDiscordName(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\b(gt|mask|penta|team|twitch|ttv|yt|youtube|live)\b/g, '')
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+
+async function getMemberMatchKeys(guild, user) {
+  const keys = new Set();
+  const add = value => {
+    const key = normalizeDiscordName(value);
+    if (key.length >= 3) keys.add(key);
+  };
+
+  add(user.username);
+  add(user.globalName);
+  add(user.displayName);
+
+  try {
+    const member = await guild.members.fetch(user.id);
+    add(member.displayName);
+    add(member.nickname);
+  } catch {}
+
+  return [...keys];
+}
+
+function linkMatchesKeys(twitchName, keys) {
+  const tw = normalizeDiscordName(twitchName);
+  if (tw.length < 3) return false;
+
+  return keys.some(key => {
+    if (key.length < 3) return false;
+    return tw === key || tw.startsWith(key) || tw.includes(key) || key.includes(tw);
+  });
 }
 
 function chunkLines(title, lines, maxLength = 1850) {
@@ -390,41 +364,98 @@ client.on('interactionCreate', async interaction => {
       const twitchMessages = await fetchMessages(twitchChannel, limit);
 
       const signedInUsers = new Map();
+      const twitchByUser = new Map();
+      const twitchLinksWithoutMention = new Set();
+      const allTwitchLinks = new Set();
+
+      // 1) Sign-in channel = truth for signed-in Discord users.
       for (const message of signinMessages) {
         for (const user of message.mentions.users.values()) {
           if (!user.bot) signedInUsers.set(user.id, user);
         }
       }
 
-      const registrations = parseTwitchRegistrations(twitchMessages);
-      const linkedUsers = registrations.byUserId;
+      // 2) Twitch channel preferred format: @DiscordUser twitch.tv/name
+      for (const message of twitchMessages) {
+        const links = extractTwitchLinks(message.content);
+        if (links.length === 0) continue;
 
-      const missingTwitch = [...signedInUsers.values()].filter(user => !linkedUsers.has(user.id));
-      const extraTwitch = [...linkedUsers.values()].filter(entry => !signedInUsers.has(entry.user.id));
-      const validLinked = [...linkedUsers.values()].filter(entry => signedInUsers.has(entry.user.id));
+        links.forEach(link => allTwitchLinks.add(link));
+        const users = [...message.mentions.users.values()].filter(user => !user.bot);
+
+        if (users.length > 0) {
+          for (const user of users) {
+            // If one message has multiple users and links, we can only safely assign the first link to all.
+            // For clean results, use one player per line/message: @User twitch.tv/name
+            twitchByUser.set(user.id, { user, links });
+          }
+        } else {
+          links.forEach(link => twitchLinksWithoutMention.add(link));
+        }
+      }
+
+      // 3) Fallback: if Twitch link was posted without @User, try to match twitch name to Discord name.
+      // Example: sign-in @HoldOn + twitch.tv/holdon52 -> matched because holdon52 contains holdon.
+      const memberKeysByUser = new Map();
+      for (const user of signedInUsers.values()) {
+        memberKeysByUser.set(user.id, await getMemberMatchKeys(interaction.guild, user));
+      }
+
+      const inferredMatches = [];
+      const stillUnassignedLinks = [];
+
+      for (const link of twitchLinksWithoutMention) {
+        const candidates = [];
+        for (const [userId, user] of signedInUsers.entries()) {
+          if (twitchByUser.has(userId)) continue;
+          const keys = memberKeysByUser.get(userId) || [];
+          if (linkMatchesKeys(link, keys)) candidates.push(user);
+        }
+
+        if (candidates.length === 1) {
+          const user = candidates[0];
+          twitchByUser.set(user.id, { user, links: [link], inferred: true });
+          inferredMatches.push(`${user} → twitch.tv/${link}`);
+        } else {
+          stillUnassignedLinks.push({ link, candidates });
+        }
+      }
+
+      const signinsMissingTwitch = [...signedInUsers.values()].filter(user => !twitchByUser.has(user.id));
+      const twitchWithoutSignin = [...twitchByUser.values()].filter(entry => !signedInUsers.has(entry.user.id));
 
       const lines = [
         '**Twitch Signup Check**',
         `Sign-ins found: ${signedInUsers.size}`,
-        `Twitch registrations with @User: ${linkedUsers.size}`,
-        `Valid sign-ins with Twitch: ${validLinked.length}`,
-        `Missing Twitch link: ${missingTwitch.length}`,
-        `Twitch registrations without sign-in: ${extraTwitch.length}`,
-        `Twitch links without @User: ${registrations.unassignedLinks.length}`,
+        `Twitch links found: ${allTwitchLinks.size}`,
+        `Matched by @User: ${[...twitchByUser.values()].filter(x => !x.inferred).length}`,
+        `Matched by name fallback: ${inferredMatches.length}`,
+        `Sign-ins missing Twitch: ${signinsMissingTwitch.length}`,
+        `Twitch registrations without sign-in: ${twitchWithoutSignin.length}`,
+        `Unassigned Twitch links: ${stillUnassignedLinks.length}`,
         '',
-        '**Missing Twitch link:**'
+        '**Sign-ins missing Twitch:**'
       ];
 
-      if (missingTwitch.length === 0) lines.push('✅ None');
-      else for (const user of missingTwitch) lines.push(`❌ ${user}`);
+      if (signinsMissingTwitch.length === 0) lines.push('✅ None');
+      else signinsMissingTwitch.forEach(user => lines.push(`❌ ${user}`));
+
+      lines.push('', '**Matched by name fallback:**');
+      if (inferredMatches.length === 0) lines.push('✅ None');
+      else inferredMatches.forEach(item => lines.push(`🟡 ${item}`));
 
       lines.push('', '**Twitch registrations without sign-in:**');
-      if (extraTwitch.length === 0) lines.push('✅ None');
-      else for (const entry of extraTwitch) lines.push(`⚠️ ${entry.user} → twitch.tv/${[...entry.links].join(', twitch.tv/')}`);
+      if (twitchWithoutSignin.length === 0) lines.push('✅ None');
+      else twitchWithoutSignin.forEach(entry => lines.push(`⚠️ ${entry.user} → ${entry.links.map(l => `twitch.tv/${l}`).join(', ')}`));
 
-      lines.push('', '**Twitch links posted without @User:**');
-      if (registrations.unassignedLinks.length === 0) lines.push('✅ None');
-      else for (const name of registrations.unassignedLinks) lines.push(`⚠️ twitch.tv/${name}`);
+      lines.push('', '**Twitch links posted without @User and not safely matched:**');
+      if (stillUnassignedLinks.length === 0) lines.push('✅ None');
+      else for (const item of stillUnassignedLinks) {
+        const note = item.candidates.length > 1 ? `ambiguous: ${item.candidates.map(u => u.toString()).join(', ')}` : 'no matching sign-in name';
+        lines.push(`⚠️ twitch.tv/${item.link} — ${note}`);
+      }
+
+      lines.push('', '**Tip:** best format in Twitch channel is `@Player twitch.tv/name`. Name fallback helps, but @User is always safer.');
 
       return replyLong(interaction, '', lines);
     }
@@ -435,28 +466,23 @@ client.on('interactionCreate', async interaction => {
       const hours = interaction.options.getInteger('hours') || 24;
       const limit = interaction.options.getInteger('limit') || 100;
       const messages = await fetchMessages(twitchChannel, limit);
+      const usernames = new Set();
+      for (const message of messages) extractTwitchLinks(message.content).forEach(name => usernames.add(name));
 
-      const registrations = parseTwitchRegistrations(messages);
-      const entries = registrationsToTwitchEntries(registrations);
-      const usernames = [...new Set(entries.map(entry => entry.twitchName))];
-
-      const results = await checkTwitchUsers(usernames, hours);
+      const results = await checkTwitchUsers([...usernames], hours);
       const live = [], vod = [], none = [], notFound = [];
 
-      for (const entry of entries) {
-        const result = results.get(entry.twitchName);
-        const label = entry.user ? `${entry.user} → twitch.tv/${entry.twitchName}` : `twitch.tv/${entry.twitchName}`;
-        if (!result || result.status === 'none') none.push(label);
-        else if (result.status === 'live') live.push(label);
-        else if (result.status === 'vod') vod.push(label);
-        else if (result.status === 'not_found') notFound.push(label);
+      for (const name of usernames) {
+        const result = results.get(name);
+        if (!result || result.status === 'none') none.push(name);
+        else if (result.status === 'live') live.push(name);
+        else if (result.status === 'vod') vod.push(name);
+        else if (result.status === 'not_found') notFound.push(name);
       }
 
       const lines = [
         '**Stream Proof Check**',
-        `Twitch accounts checked: ${usernames.length}`,
-        `Linked Discord users: ${registrations.byUserId.size}`,
-        `Links without @User: ${registrations.unassignedLinks.length}`,
+        `Twitch links checked: ${usernames.size}`,
         `Live now: ${live.length}`,
         `Recent VOD in last ${hours}h: ${vod.length}`,
         `No proof found: ${none.length}`,
@@ -464,13 +490,13 @@ client.on('interactionCreate', async interaction => {
         '',
         '**LIVE NOW:**'
       ];
-      lines.push(...(live.length ? live.map(n => `🟢 ${n}`) : ['✅ None']));
+      lines.push(...(live.length ? live.map(n => `🟢 twitch.tv/${n}`) : ['✅ None']));
       lines.push('', `**Recent VOD found, last ${hours}h:**`);
-      lines.push(...(vod.length ? vod.map(n => `🟡 ${n}`) : ['✅ None']));
+      lines.push(...(vod.length ? vod.map(n => `🟡 twitch.tv/${n}`) : ['✅ None']));
       lines.push('', '**No stream proof found:**');
-      lines.push(...(none.length ? none.map(n => `🔴 ${n}`) : ['✅ None']));
+      lines.push(...(none.length ? none.map(n => `🔴 twitch.tv/${n}`) : ['✅ None']));
       lines.push('', '**Twitch user not found:**');
-      lines.push(...(notFound.length ? notFound.map(n => `⚠️ ${n}`) : ['✅ None']));
+      lines.push(...(notFound.length ? notFound.map(n => `⚠️ twitch.tv/${n}`) : ['✅ None']));
 
       return replyLong(interaction, '', lines);
     }
