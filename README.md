@@ -1,23 +1,13 @@
-# GT Role Bot V5
+# GT Role Bot V5.1
 
-## Commands
+Discord.js v14 bot for GT role and Twitch signup checks.
 
-- `/giverolefromchannel` - gives a role to all mentioned users in a channel
-- `/takerolefromchannel` - removes a role from all mentioned users in a channel
-- `/earningsroles` - updates earnings roles from `@User 12345`
-- `/checksignup` - before cup: compares sign-ins with Twitch registrations
-- `/checkstreamproof` - after cup: checks Twitch links for live status or recent VODs
+## Fixes in V5.1
 
-## Important for `/checksignup`
-
-Best format in Twitch channel:
-
-```txt
-@Player twitch.tv/twitchname
-```
-
-V5 compares by Discord User ID when an `@User` is included.
-If the Twitch link has no `@User`, V5 tries a name fallback, e.g. `@HoldOn` can match `twitch.tv/holdon52`.
+- Fixes Discord `Unknown interaction` by deferring immediately at command start.
+- Fixes `Cannot read properties of null (reading messages)` with text-channel validation.
+- Keeps the V5 signup logic with up to 1000 messages scanned by default.
+- Uses `@User twitch.tv/name` as the most reliable Twitch registration format.
 
 ## Render Environment Variables
 
@@ -31,16 +21,14 @@ TWITCH_CLIENT_SECRET=your_twitch_client_secret
 
 ## Render
 
-Use a **Background Worker**.
+Use a Background Worker.
 
-Build Command:
-
-```txt
+Build command:
+```bash
 npm install
 ```
 
-Start Command:
-
-```txt
+Start command:
+```bash
 npm start
 ```
