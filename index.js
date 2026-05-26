@@ -54,8 +54,60 @@ const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
   new SlashCommandBuilder()
+    .setName("checksignup")
+    .setDescription("Pre-cup check: compares sign-ins with Twitch links.")
+    .addChannelOption(option =>
+      option
+        .setName("signins_channel")
+        .setDescription("Channel containing the sign-ins")
+        .setRequired(true)
+    )
+    .addChannelOption(option =>
+      option
+        .setName("twitch_channel")
+        .setDescription("Channel containing the Twitch links")
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("limit")
+        .setDescription("How many messages per channel to scan, max 100")
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
+    .setName("checkstreamproof")
+    .setDescription("After-cup check: checks who is live or has a recent Twitch VOD.")
+    .addChannelOption(option =>
+      option
+        .setName("twitch_channel")
+        .setDescription("Channel containing the Twitch links")
+        .setRequired(true)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("hours")
+        .setDescription("Recent stream/VOD check window in hours, default 24")
+        .setRequired(false)
+    )
+    .addIntegerOption(option =>
+      option
+        .setName("limit")
+        .setDescription("How many messages to scan, max 100")
+        .setRequired(false)
+    )
+    .addChannelOption(option =>
+      option
+        .setName("signins_channel")
+        .setDescription("Optional: only check Twitch links from signed-in players")
+        .setRequired(false)
+    )
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
     .setName("checktwitchsignins")
-    .setDescription("Compares Twitch links with sign-ins and checks Twitch live/recent stream status.")
+    .setDescription("Legacy: combined Twitch sign-in and stream proof check.")
     .addChannelOption(option =>
       option
         .setName("twitch_channel")
@@ -277,6 +329,68 @@ function collectTwitchNamesFromMessages(messages) {
   return result;
 }
 
+function collectSignupData(messages) {
+  const users = new Map();
+  const twitchNames = new Set();
+  const sortedMessages = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+  for (const message of sortedMessages) {
+    const names = extractTwitchNames(message.content);
+    for (const name of names) twitchNames.add(name);
+
+    for (const user of message.mentions.users.values()) {
+      if (!users.has(user.id)) {
+        users.set(user.id, {
+          userId: user.id,
+          mention: `<@${user.id}>`,
+          tag: user.tag,
+          twitchNames: new Set(),
+          messageUrl: message.url
+        });
+      }
+      const entry = users.get(user.id);
+      for (const name of names) entry.twitchNames.add(name);
+    }
+  }
+
+  return { users, twitchNames };
+}
+
+function collectTwitchLinkData(messages) {
+  const entries = [];
+  const byName = new Map();
+  const byMentionedUser = new Map();
+  const sortedMessages = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+  for (const message of sortedMessages) {
+    const twitchNames = extractTwitchNames(message.content);
+    if (!twitchNames.length) continue;
+
+    const mentionedUserIds = [...message.mentions.users.keys()];
+    for (const twitchName of twitchNames) {
+      const entry = {
+        twitchName,
+        mentionedUserIds,
+        authorId: message.author?.id || null,
+        authorTag: message.author?.tag || "unknown",
+        messageUrl: message.url
+      };
+      entries.push(entry);
+      if (!byName.has(twitchName)) byName.set(twitchName, entry);
+      for (const userId of mentionedUserIds) {
+        if (!byMentionedUser.has(userId)) byMentionedUser.set(userId, []);
+        byMentionedUser.get(userId).push(entry);
+      }
+    }
+  }
+
+  return { entries, byName, byMentionedUser };
+}
+
+function uniqueTwitchNamesFromEntries(entries) {
+  return [...new Set(entries.map(entry => entry.twitchName))].sort();
+}
+
 let twitchTokenCache = { token: null, expiresAt: 0 };
 
 async function getTwitchToken() {
@@ -368,6 +482,159 @@ function shortenList(items, max = 20) {
   const visible = items.slice(0, max);
   const extra = items.length - visible.length;
   return visible.join("\n") + (extra > 0 ? `\n...and ${extra} more` : "");
+}
+
+async function checkSignup(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const signinsChannel = interaction.options.getChannel("signins_channel");
+  const twitchChannel = interaction.options.getChannel("twitch_channel");
+  const limit = interaction.options.getInteger("limit") || 100;
+
+  try {
+    const [signinMessages, twitchMessages] = await Promise.all([
+      fetchMessages(signinsChannel, limit),
+      fetchMessages(twitchChannel, limit)
+    ]);
+
+    const signup = collectSignupData(signinMessages);
+    const twitch = collectTwitchLinkData(twitchMessages);
+
+    const signedUserIds = [...signup.users.keys()];
+    const twitchNames = uniqueTwitchNamesFromEntries(twitch.entries);
+
+    if (!signedUserIds.length && !signup.twitchNames.size) {
+      return interaction.editReply("No sign-ins found. I need Discord mentions in the sign-in channel, or Twitch links there too.");
+    }
+
+    if (!twitch.entries.length) {
+      return interaction.editReply("No Twitch links found in the selected Twitch channel.");
+    }
+
+    const missingTwitchLinks = [];
+    const signedWithTwitch = [];
+
+    if (signedUserIds.length) {
+      for (const userId of signedUserIds) {
+        const signupEntry = signup.users.get(userId);
+        const linksForUser = twitch.byMentionedUser.get(userId) || [];
+        const signupTwitchMatch = [...signupEntry.twitchNames].some(name => twitch.byName.has(name));
+
+        if (linksForUser.length || signupTwitchMatch) {
+          const names = linksForUser.map(e => e.twitchName).concat([...signupEntry.twitchNames].filter(name => twitch.byName.has(name)));
+          signedWithTwitch.push(`${signupEntry.mention}${names.length ? ` → ${[...new Set(names)].join(", ")}` : ""}`);
+        } else {
+          missingTwitchLinks.push(`❌ ${signupEntry.mention}`);
+        }
+      }
+    }
+
+    const extraTwitchLinks = [];
+    for (const entry of twitch.entries) {
+      const hasSignedMention = entry.mentionedUserIds.some(userId => signup.users.has(userId));
+      const twitchNameInSignin = signup.twitchNames.has(entry.twitchName);
+      if (!hasSignedMention && !twitchNameInSignin) {
+        extraTwitchLinks.push(`⚠️ ${entry.twitchName}${entry.mentionedUserIds.length ? ` (${entry.mentionedUserIds.map(id => `<@${id}>`).join(", ")})` : ""}`);
+      }
+    }
+
+    const response = [
+      "Pre-Cup Signup Check",
+      `Sign-ins found: ${signedUserIds.length || signup.twitchNames.size}`,
+      `Twitch links found: ${twitchNames.length}`,
+      `Sign-ins with Twitch link: ${signedUserIds.length ? signedWithTwitch.length : "checked by Twitch names"}`,
+      `Missing Twitch link: ${missingTwitchLinks.length}`,
+      `Extra Twitch links without sign-in: ${extraTwitchLinks.length}`,
+      "",
+      `Missing Twitch Links:\n${shortenList(missingTwitchLinks, 30)}`,
+      "",
+      `Extra Twitch Links without Sign-In:\n${shortenList(extraTwitchLinks, 30)}`
+    ].join("\n");
+
+    return interaction.editReply(response.slice(0, 1900));
+  } catch (error) {
+    console.error("checksignup failed:", error);
+    return interaction.editReply(`Error: ${error.message}`);
+  }
+}
+
+async function checkStreamProof(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+
+  const twitchChannel = interaction.options.getChannel("twitch_channel");
+  const signinsChannel = interaction.options.getChannel("signins_channel");
+  const limit = interaction.options.getInteger("limit") || 100;
+  const hours = interaction.options.getInteger("hours") || 24;
+
+  try {
+    const twitchMessages = await fetchMessages(twitchChannel, limit);
+    const twitch = collectTwitchLinkData(twitchMessages);
+    let entriesToCheck = twitch.entries;
+
+    if (signinsChannel) {
+      const signinMessages = await fetchMessages(signinsChannel, limit);
+      const signup = collectSignupData(signinMessages);
+      entriesToCheck = twitch.entries.filter(entry => {
+        const hasSignedMention = entry.mentionedUserIds.some(userId => signup.users.has(userId));
+        const twitchNameInSignin = signup.twitchNames.has(entry.twitchName);
+        return hasSignedMention || twitchNameInSignin;
+      });
+    }
+
+    const twitchNames = uniqueTwitchNamesFromEntries(entriesToCheck);
+    if (!twitchNames.length) {
+      return interaction.editReply("No Twitch links found to check. If you used signins_channel, no signed-in Twitch links were matched.");
+    }
+
+    const usersByLogin = await getTwitchUsersByLogin(twitchNames);
+    const liveByLogin = await getLiveStreamsByLogin(twitchNames);
+
+    const liveNow = [];
+    const recentVod = [];
+    const noProof = [];
+    const unknownAccounts = [];
+
+    for (const name of twitchNames) {
+      const user = usersByLogin.get(name);
+      if (!user) {
+        unknownAccounts.push(`⚠️ ${name}`);
+        continue;
+      }
+
+      const live = liveByLogin.get(name);
+      if (live) {
+        liveNow.push(`🟢 ${name} — LIVE now`);
+        continue;
+      }
+
+      const recentVideo = await getRecentVideoForUser(user.id, hours);
+      if (recentVideo) {
+        recentVod.push(`🟡 ${name} — VOD found`);
+      } else {
+        noProof.push(`🔴 ${name}`);
+      }
+    }
+
+    const response = [
+      "After-Cup Stream Proof Check",
+      `Twitch channels checked: ${twitchNames.length}`,
+      `Live now: ${liveNow.length}`,
+      `Recent VOD in last ${hours}h: ${recentVod.length}`,
+      `No live/recent VOD found: ${noProof.length}`,
+      "",
+      `Live now:\n${shortenList(liveNow, 25)}`,
+      "",
+      `Recent VOD found:\n${shortenList(recentVod, 25)}`,
+      "",
+      `No Stream Proof:\n${shortenList(noProof, 30)}`,
+      unknownAccounts.length ? `\nUnknown Twitch accounts:\n${shortenList(unknownAccounts, 20)}` : ""
+    ].filter(Boolean).join("\n");
+
+    return interaction.editReply(response.slice(0, 1900));
+  } catch (error) {
+    console.error("checkstreamproof failed:", error);
+    return interaction.editReply(`Error: ${error.message}`);
+  }
 }
 
 async function checkTwitchSignins(interaction) {
@@ -462,6 +729,8 @@ client.on("interactionCreate", async interaction => {
   if (interaction.commandName === "giverolefromchannel") return giveOrTakeRoleFromChannel(interaction, "give");
   if (interaction.commandName === "takerolefromchannel") return giveOrTakeRoleFromChannel(interaction, "take");
   if (interaction.commandName === "earningsroles") return updateEarningsRoles(interaction);
+  if (interaction.commandName === "checksignup") return checkSignup(interaction);
+  if (interaction.commandName === "checkstreamproof") return checkStreamProof(interaction);
   if (interaction.commandName === "checktwitchsignins") return checkTwitchSignins(interaction);
 });
 
