@@ -104,6 +104,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 async function registerCommands() {
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
   console.log('Slash commands registered.');
+  console.log('GT Role Bot V5.2 command set active.');
 }
 
 function normalizeTwitchName(value) {
@@ -368,7 +369,20 @@ async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
 }
 
 client.once('clientReady', () => {
+  console.log('==============================');
+  console.log('GT ROLE BOT V5.2 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
+  console.log('If you still see line numbers from older versions, another Render service is still running.');
+  console.log('==============================');
+});
+
+
+process.on('unhandledRejection', error => {
+  console.error('Unhandled promise rejection:', error);
+});
+
+process.on('uncaughtException', error => {
+  console.error('Uncaught exception:', error);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -377,7 +391,7 @@ client.on('interactionCreate', async interaction => {
   try {
     // Discord requires an acknowledgement within about 3 seconds. Do this first,
     // before scans, API calls, or any heavy work.
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    await interaction.deferReply({ ephemeral: true });
   } catch (error) {
     console.error('Failed to defer interaction:', error);
     return;
@@ -427,7 +441,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'earningsroles') {
-      const channel = interaction.options.getChannel('channel');
+      const channel = validateTextChannel(interaction.options.getChannel('channel'), 'channel');
       const limit = interaction.options.getInteger('limit') || 1000;
       const messages = await fetchMessages(channel, limit);
       const allEarningsRoleIds = config.earningsRoles.map(r => r.roleId);
