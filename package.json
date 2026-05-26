@@ -1,7 +1,7 @@
 {
   "name": "gt-role-bot",
-  "version": "4.1.0",
-  "description": "GT Role Bot with role commands, earnings roles and Twitch signup/stream proof checks.",
+  "version": "5.0.0",
+  "description": "GT Role Bot with role tools, earnings roles, Twitch signup checks and stream proof checks.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -10,7 +10,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "discord.js": "^14.18.0",
-    "dotenv": "^16.4.7"
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5"
   }
 }
