@@ -118,6 +118,71 @@ function extractTwitchLinks(content) {
   return [...found];
 }
 
+
+function parseTwitchRegistrations(messages) {
+  const byUserId = new Map();
+  const unassignedLinks = new Set();
+
+  for (const message of messages) {
+    const usersById = message.mentions.users;
+    const lines = String(message.content || '').split(/\r?\n/);
+    let messageHadPairedLine = false;
+
+    for (const line of lines) {
+      const links = extractTwitchLinks(line);
+      if (links.length === 0) continue;
+
+      const mentionIds = [...line.matchAll(/<@!?(\d+)>/g)].map(match => match[1]);
+      const validUsers = mentionIds
+        .map(id => usersById.get(id))
+        .filter(user => user && !user.bot);
+
+      if (validUsers.length === 0) {
+        links.forEach(link => unassignedLinks.add(link));
+        continue;
+      }
+
+      messageHadPairedLine = true;
+      validUsers.forEach((user, index) => {
+        const link = links[index] || links[0];
+        if (!byUserId.has(user.id)) byUserId.set(user.id, { user, links: new Set() });
+        byUserId.get(user.id).links.add(link);
+      });
+    }
+
+    if (!messageHadPairedLine) {
+      const links = extractTwitchLinks(message.content);
+      const validUsers = [...message.mentions.users.values()].filter(user => !user.bot);
+
+      if (links.length > 0 && validUsers.length > 0) {
+        validUsers.forEach((user, index) => {
+          const link = links[index] || links[0];
+          if (!byUserId.has(user.id)) byUserId.set(user.id, { user, links: new Set() });
+          byUserId.get(user.id).links.add(link);
+        });
+      }
+    }
+  }
+
+  return {
+    byUserId,
+    unassignedLinks: [...unassignedLinks]
+  };
+}
+
+function registrationsToTwitchEntries(registrations) {
+  const entries = [];
+  for (const registration of registrations.byUserId.values()) {
+    for (const twitchName of registration.links) {
+      entries.push({ user: registration.user, twitchName });
+    }
+  }
+  for (const twitchName of registrations.unassignedLinks) {
+    entries.push({ user: null, twitchName });
+  }
+  return entries;
+}
+
 async function fetchMessages(channel, limit = 100) {
   const messages = await channel.messages.fetch({ limit: Math.min(Math.max(limit, 1), 100) });
   return [...messages.values()].reverse();
@@ -325,51 +390,41 @@ client.on('interactionCreate', async interaction => {
       const twitchMessages = await fetchMessages(twitchChannel, limit);
 
       const signedInUsers = new Map();
-      const signinsWithTwitch = new Map();
-      const signinsMissingTwitch = new Map();
-      const twitchLinksInSignins = new Set();
-      const twitchLinksChannel = new Set();
-
       for (const message of signinMessages) {
-        const links = extractTwitchLinks(message.content);
-        links.forEach(link => twitchLinksInSignins.add(link));
-
         for (const user of message.mentions.users.values()) {
-          if (user.bot) continue;
-          signedInUsers.set(user.id, user);
-          if (links.length > 0) signinsWithTwitch.set(user.id, { user, links });
-          else signinsMissingTwitch.set(user.id, user);
+          if (!user.bot) signedInUsers.set(user.id, user);
         }
       }
 
-      for (const message of twitchMessages) {
-        extractTwitchLinks(message.content).forEach(link => twitchLinksChannel.add(link));
-      }
+      const registrations = parseTwitchRegistrations(twitchMessages);
+      const linkedUsers = registrations.byUserId;
 
-      const missingInSignins = [...twitchLinksChannel].filter(link => !twitchLinksInSignins.has(link));
-      const twitchInSignupButNotLinkChannel = [...twitchLinksInSignins].filter(link => !twitchLinksChannel.has(link));
+      const missingTwitch = [...signedInUsers.values()].filter(user => !linkedUsers.has(user.id));
+      const extraTwitch = [...linkedUsers.values()].filter(entry => !signedInUsers.has(entry.user.id));
+      const validLinked = [...linkedUsers.values()].filter(entry => signedInUsers.has(entry.user.id));
 
       const lines = [
         '**Twitch Signup Check**',
         `Sign-ins found: ${signedInUsers.size}`,
-        `Twitch links in Twitch channel: ${twitchLinksChannel.size}`,
-        `Sign-ins with Twitch link: ${signinsWithTwitch.size}`,
-        `Sign-ins missing Twitch link: ${signinsMissingTwitch.size}`,
-        `Twitch links posted but not inside sign-in messages: ${missingInSignins.length}`,
+        `Twitch registrations with @User: ${linkedUsers.size}`,
+        `Valid sign-ins with Twitch: ${validLinked.length}`,
+        `Missing Twitch link: ${missingTwitch.length}`,
+        `Twitch registrations without sign-in: ${extraTwitch.length}`,
+        `Twitch links without @User: ${registrations.unassignedLinks.length}`,
         '',
-        '**Sign-ins missing Twitch link:**'
+        '**Missing Twitch link:**'
       ];
 
-      if (signinsMissingTwitch.size === 0) lines.push('✅ None');
-      else for (const user of signinsMissingTwitch.values()) lines.push(`❌ ${user}`);
+      if (missingTwitch.length === 0) lines.push('✅ None');
+      else for (const user of missingTwitch) lines.push(`❌ ${user}`);
 
-      lines.push('', '**Twitch links posted but not found in sign-in messages:**');
-      if (missingInSignins.length === 0) lines.push('✅ None');
-      else for (const name of missingInSignins) lines.push(`⚠️ twitch.tv/${name}`);
+      lines.push('', '**Twitch registrations without sign-in:**');
+      if (extraTwitch.length === 0) lines.push('✅ None');
+      else for (const entry of extraTwitch) lines.push(`⚠️ ${entry.user} → twitch.tv/${[...entry.links].join(', twitch.tv/')}`);
 
-      lines.push('', '**Twitch links in sign-ins but not posted in Twitch link channel:**');
-      if (twitchInSignupButNotLinkChannel.length === 0) lines.push('✅ None');
-      else for (const name of twitchInSignupButNotLinkChannel) lines.push(`⚠️ twitch.tv/${name}`);
+      lines.push('', '**Twitch links posted without @User:**');
+      if (registrations.unassignedLinks.length === 0) lines.push('✅ None');
+      else for (const name of registrations.unassignedLinks) lines.push(`⚠️ twitch.tv/${name}`);
 
       return replyLong(interaction, '', lines);
     }
@@ -380,23 +435,28 @@ client.on('interactionCreate', async interaction => {
       const hours = interaction.options.getInteger('hours') || 24;
       const limit = interaction.options.getInteger('limit') || 100;
       const messages = await fetchMessages(twitchChannel, limit);
-      const usernames = new Set();
-      for (const message of messages) extractTwitchLinks(message.content).forEach(name => usernames.add(name));
 
-      const results = await checkTwitchUsers([...usernames], hours);
+      const registrations = parseTwitchRegistrations(messages);
+      const entries = registrationsToTwitchEntries(registrations);
+      const usernames = [...new Set(entries.map(entry => entry.twitchName))];
+
+      const results = await checkTwitchUsers(usernames, hours);
       const live = [], vod = [], none = [], notFound = [];
 
-      for (const name of usernames) {
-        const result = results.get(name);
-        if (!result || result.status === 'none') none.push(name);
-        else if (result.status === 'live') live.push(name);
-        else if (result.status === 'vod') vod.push(name);
-        else if (result.status === 'not_found') notFound.push(name);
+      for (const entry of entries) {
+        const result = results.get(entry.twitchName);
+        const label = entry.user ? `${entry.user} → twitch.tv/${entry.twitchName}` : `twitch.tv/${entry.twitchName}`;
+        if (!result || result.status === 'none') none.push(label);
+        else if (result.status === 'live') live.push(label);
+        else if (result.status === 'vod') vod.push(label);
+        else if (result.status === 'not_found') notFound.push(label);
       }
 
       const lines = [
         '**Stream Proof Check**',
-        `Twitch links checked: ${usernames.size}`,
+        `Twitch accounts checked: ${usernames.length}`,
+        `Linked Discord users: ${registrations.byUserId.size}`,
+        `Links without @User: ${registrations.unassignedLinks.length}`,
         `Live now: ${live.length}`,
         `Recent VOD in last ${hours}h: ${vod.length}`,
         `No proof found: ${none.length}`,
@@ -404,13 +464,13 @@ client.on('interactionCreate', async interaction => {
         '',
         '**LIVE NOW:**'
       ];
-      lines.push(...(live.length ? live.map(n => `🟢 twitch.tv/${n}`) : ['✅ None']));
+      lines.push(...(live.length ? live.map(n => `🟢 ${n}`) : ['✅ None']));
       lines.push('', `**Recent VOD found, last ${hours}h:**`);
-      lines.push(...(vod.length ? vod.map(n => `🟡 twitch.tv/${n}`) : ['✅ None']));
+      lines.push(...(vod.length ? vod.map(n => `🟡 ${n}`) : ['✅ None']));
       lines.push('', '**No stream proof found:**');
-      lines.push(...(none.length ? none.map(n => `🔴 twitch.tv/${n}`) : ['✅ None']));
+      lines.push(...(none.length ? none.map(n => `🔴 ${n}`) : ['✅ None']));
       lines.push('', '**Twitch user not found:**');
-      lines.push(...(notFound.length ? notFound.map(n => `⚠️ twitch.tv/${n}`) : ['✅ None']));
+      lines.push(...(notFound.length ? notFound.map(n => `⚠️ ${n}`) : ['✅ None']));
 
       return replyLong(interaction, '', lines);
     }
