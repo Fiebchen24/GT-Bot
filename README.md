@@ -1,42 +1,58 @@
-# GT Role Bot V5.3
+# GT Role Bot V5.4
+
+Discord.js v14 bot for GT role utilities, earnings roles, signup checks and post-cup Twitch proof checks.
 
 ## Commands
 
-### /giverolefromchannel
-Gives a selected role to every Discord user mentioned in a selected channel.
+- `/giverolefromchannel`
+- `/takerolefromchannel`
+- `/earningsroles`
+- `/checksignup`
+- `/checkstreamproof`
 
-### /takerolefromchannel
-Removes a selected role from every Discord user mentioned in a selected channel.
+## Pre-cup signup check
 
-### /earningsroles
-Updates earnings roles based on `@User 12500` style entries.
+Use `/checksignup` with:
+- `signin_channel`: channel where sign-ins contain Discord mentions like `@Player`
+- `twitch_channel`: channel where registrations contain `DiscordName twitch.tv/twitchname` or `@Player twitch.tv/twitchname`
 
-### /checksignup
-Before the cup. Compares a sign-in channel against a Twitch link channel.
+The full report is posted in the command channel. Short notices are posted into the sign-in and Twitch channels.
 
-Sign-in channel format:
-```txt
-@Player
-@Player2
-```
+## Post-cup stream proof check
 
-Twitch channel supported formats:
-```txt
-DiscordName twitch.tv/twitchname
-@DiscordName twitch.tv/twitchname
-```
+Use `/checkstreamproof` with:
+- `signin_channel`
+- `twitch_channel`
+- `hours`: VOD lookback window, default 24 hours
 
-The command response is public in the command channel and only lists missing/problem entries. It also posts a short summary in the sign-in channel and Twitch channel.
+The bot checks matched signed-in players and reports:
+- live now
+- recent Twitch VOD found
+- no stream proof found
+- Twitch user not found
+- missing Twitch registrations
 
-### /checkstreamproof
-After the cup. Checks Twitch links for live status or recent VODs.
-
-## Render Environment Variables
+## Required Render environment variables
 
 ```env
 TOKEN=your_discord_bot_token
-CLIENT_ID=your_application_id
-GUILD_ID=your_server_id
+CLIENT_ID=your_discord_application_id
+GUILD_ID=your_discord_server_id
 TWITCH_CLIENT_ID=your_twitch_client_id
 TWITCH_CLIENT_SECRET=your_twitch_client_secret
+```
+
+## Render
+
+Use a Background Worker:
+
+```bash
+npm install
+npm start
+```
+
+After deploy the logs should show:
+
+```txt
+GT ROLE BOT V5.4 LOADED
 ```

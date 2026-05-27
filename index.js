@@ -88,10 +88,15 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('checkstreamproof')
-    .setDescription('After cup: checks Twitch links for live status or recent VODs.')
+    .setDescription('After cup: checks signed-in players for live status or recent Twitch VODs.')
+    .addChannelOption(option => option
+      .setName('signin_channel')
+      .setDescription('Channel with sign-ins / Discord mentions')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
     .addChannelOption(option => option
       .setName('twitch_channel')
-      .setDescription('Channel with Twitch links / Twitch registrations')
+      .setDescription('Channel with Discord names + Twitch links')
       .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
       .setRequired(true))
     .addIntegerOption(option => option.setName('hours').setDescription('How many hours back to check VODs. Default 24').setMinValue(1).setMaxValue(168).setRequired(false))
@@ -104,7 +109,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 async function registerCommands() {
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
   console.log('Slash commands registered.');
-  console.log('GT Role Bot V5.3 command set active.');
+  console.log('GT Role Bot V5.4 command set active.');
 }
 
 function normalizeTwitchName(value) {
@@ -395,7 +400,7 @@ async function sendChannelNotice(channel, content) {
 
 client.once('clientReady', () => {
   console.log('==============================');
-  console.log('GT ROLE BOT V5.3 LOADED');
+  console.log('GT ROLE BOT V5.4 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
   console.log('If you still see line numbers from older versions, another Render service is still running.');
   console.log('==============================');
@@ -551,44 +556,102 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'checkstreamproof') {
+      const signinChannel = validateTextChannel(interaction.options.getChannel('signin_channel'), 'sign-in channel');
       const twitchChannel = validateTextChannel(interaction.options.getChannel('twitch_channel'), 'Twitch channel');
       const hours = interaction.options.getInteger('hours') || 24;
       const limit = interaction.options.getInteger('limit') || 1000;
-      const messages = await fetchMessages(twitchChannel, limit);
-      const usernames = new Set();
-      for (const message of messages) extractTwitchLinks(message.content).forEach(name => usernames.add(name));
 
-      const results = await checkTwitchUsers([...usernames], hours);
-      const live = [], vod = [], none = [], notFound = [];
+      const data = await buildSignupData(interaction.guild, signinChannel, twitchChannel, limit);
+      const {
+        signedInUsers,
+        twitchByUser,
+        allLinks,
+        looseLinks,
+        signinsMissingTwitch,
+        twitchWithoutSignin,
+        signinMessagesScanned,
+        twitchMessagesScanned
+      } = data;
 
-      for (const name of usernames) {
-        const result = results.get(name);
-        if (!result || result.status === 'none') none.push(name);
-        else if (result.status === 'live') live.push(name);
-        else if (result.status === 'vod') vod.push(name);
-        else if (result.status === 'not_found') notFound.push(name);
+      const matchedEntries = [...twitchByUser.values()].filter(entry => signedInUsers.has(entry.user.id));
+      const usernamesToCheck = new Set();
+      for (const entry of matchedEntries) {
+        for (const link of entry.links) usernamesToCheck.add(link);
       }
 
-      const lines = [
-        '**Stream Proof Check V5.3**',
-        `Messages scanned: ${messages.length}`,
-        `Twitch links checked: ${usernames.size}`,
-        `Live now: ${live.length}`,
-        `Recent VOD in last ${hours}h: ${vod.length}`,
-        `No proof found: ${none.length}`,
-        `Twitch user not found: ${notFound.length}`,
-        '',
-        '**LIVE NOW:**'
-      ];
-      lines.push(...(live.length ? live.map(n => `🟢 twitch.tv/${n}`) : ['✅ None']));
-      lines.push('', `**Recent VOD found, last ${hours}h:**`);
-      lines.push(...(vod.length ? vod.map(n => `🟡 twitch.tv/${n}`) : ['✅ None']));
-      lines.push('', '**No stream proof found:**');
-      lines.push(...(none.length ? none.map(n => `🔴 twitch.tv/${n}`) : ['✅ None']));
-      lines.push('', '**Twitch user not found:**');
-      lines.push(...(notFound.length ? notFound.map(n => `⚠️ twitch.tv/${n}`) : ['✅ None']));
+      const results = await checkTwitchUsers([...usernamesToCheck], hours);
 
-      return replyLong(interaction, '', lines);
+      const live = [];
+      const vod = [];
+      const none = [];
+      const notFound = [];
+
+      for (const entry of matchedEntries) {
+        const links = [...entry.links];
+        const statuses = links.map(link => ({ link, result: results.get(link) || { status: 'none' } }));
+
+        const liveResult = statuses.find(item => item.result.status === 'live');
+        const vodResult = statuses.find(item => item.result.status === 'vod');
+        const notFoundOnly = statuses.every(item => item.result.status === 'not_found');
+
+        if (liveResult) {
+          live.push({ user: entry.user, link: liveResult.link });
+        } else if (vodResult) {
+          vod.push({ user: entry.user, link: vodResult.link, vodUrl: vodResult.result.vodUrl });
+        } else if (notFoundOnly) {
+          notFound.push({ user: entry.user, links });
+        } else {
+          none.push({ user: entry.user, links });
+        }
+      }
+
+      const shortNotice = `✅ Post-cup stream proof check done. Checked ${signedInUsers.size} sign-ins. ${matchedEntries.length} Twitch registrations checked. Live: ${live.length}. VOD: ${vod.length}. No proof: ${none.length}. Details are in ${interaction.channel}.`;
+      await sendChannelNotice(signinChannel, shortNotice);
+      if (twitchChannel.id !== signinChannel.id) await sendChannelNotice(twitchChannel, shortNotice);
+
+      const lines = [
+        '**Post-Cup Stream Proof Check**',
+        `Checked ${signedInUsers.size} sign-ins.`,
+        `${allLinks.size} Twitch streams/links are in the Twitch channel.`,
+        `${matchedEntries.length} signed-in players have a matched Twitch registration.`,
+        `${signinsMissingTwitch.length} signed-in players are missing a Twitch registration.`,
+        '',
+        `Messages scanned: ${signinMessagesScanned} sign-in messages, ${twitchMessagesScanned} Twitch messages.`,
+        `VOD lookback: last ${hours} hours.`,
+        '',
+        `🟢 Live now: ${live.length}`,
+        `🟡 Recent VOD found: ${vod.length}`,
+        `🔴 No stream proof found: ${none.length}`,
+        `⚠️ Twitch user not found: ${notFound.length}`,
+        ''
+      ];
+
+      lines.push('**Missing Twitch registrations:**');
+      lines.push(...(signinsMissingTwitch.length ? signinsMissingTwitch.map(user => `❌ ${user}`) : ['✅ None']));
+
+      lines.push('', '**LIVE NOW:**');
+      lines.push(...(live.length ? live.map(item => `🟢 ${item.user} → twitch.tv/${item.link}`) : ['✅ None']));
+
+      lines.push('', `**Recent VOD found, last ${hours}h:**`);
+      lines.push(...(vod.length ? vod.map(item => `🟡 ${item.user} → twitch.tv/${item.link}${item.vodUrl ? ` | ${item.vodUrl}` : ''}`) : ['✅ None']));
+
+      lines.push('', '**No stream proof found:**');
+      lines.push(...(none.length ? none.map(item => `🔴 ${item.user} → ${item.links.map(link => `twitch.tv/${link}`).join(', ')}`) : ['✅ None']));
+
+      lines.push('', '**Twitch user not found:**');
+      lines.push(...(notFound.length ? notFound.map(item => `⚠️ ${item.user} → ${item.links.map(link => `twitch.tv/${link}`).join(', ')}`) : ['✅ None']));
+
+      if (twitchWithoutSignin.length) {
+        lines.push('', '**Twitch registrations without sign-in:**');
+        lines.push(...twitchWithoutSignin.map(entry => `⚠️ ${entry.user} → ${[...entry.links].map(link => `twitch.tv/${link}`).join(', ')}`));
+      }
+
+      if (looseLinks.size) {
+        lines.push('', '**Loose Twitch links not assigned to a Discord sign-in:**');
+        lines.push(...[...looseLinks].map(link => `⚠️ twitch.tv/${link}`));
+      }
+
+      return replyLong(interaction, '', lines, false);
     }
   } catch (error) {
     console.error(error);
