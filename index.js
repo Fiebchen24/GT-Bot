@@ -96,6 +96,18 @@ const commands = [
       .setRequired(true))
     .addIntegerOption(option => option.setName('hours').setDescription('How many hours back to check VODs. Default 24').setMinValue(1).setMaxValue(168).setRequired(false))
     .addIntegerOption(scanLimitOption)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
+    .setName('postcupcheck')
+    .setDescription('After cup: checks only the Twitch link channel for live status or recent VODs.')
+    .addChannelOption(option => option
+      .setName('twitch_channel')
+      .setDescription('Channel with Discord names + Twitch links')
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+      .setRequired(true))
+    .addIntegerOption(option => option.setName('hours').setDescription('How many hours back to check VODs. Default 24').setMinValue(1).setMaxValue(168).setRequired(false))
+    .addIntegerOption(scanLimitOption)
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
 ].map(command => command.toJSON());
 
@@ -104,7 +116,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 async function registerCommands() {
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
   console.log('Slash commands registered.');
-  console.log('GT Role Bot V5.5 command set active.');
+  console.log('GT Role Bot V5.6 command set active.');
 }
 
 function normalizeTwitchName(value) {
@@ -446,7 +458,7 @@ async function sendChannelNotice(channel, content) {
 
 client.once('clientReady', () => {
   console.log('==============================');
-  console.log('GT ROLE BOT V5.5 LOADED');
+  console.log('GT ROLE BOT V5.6 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
   console.log('If you still see line numbers from older versions, another Render service is still running.');
   console.log('==============================');
@@ -464,7 +476,7 @@ process.on('uncaughtException', error => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
-  const shouldReplyPublic = ['checksignup', 'checkstreamproof'].includes(interaction.commandName);
+  const shouldReplyPublic = ['checksignup', 'checkstreamproof', 'postcupcheck'].includes(interaction.commandName);
 
   try {
     // Discord requires an acknowledgement within about 3 seconds. Do this first,
@@ -601,7 +613,7 @@ client.on('interactionCreate', async interaction => {
       return replyLong(interaction, '', lines, false);
     }
 
-    if (interaction.commandName === 'checkstreamproof') {
+    if (interaction.commandName === 'checkstreamproof' || interaction.commandName === 'postcupcheck') {
       const twitchChannel = validateTextChannel(interaction.options.getChannel('twitch_channel'), 'Twitch channel');
       const hours = interaction.options.getInteger('hours') || 24;
       const limit = interaction.options.getInteger('limit') || 1000;

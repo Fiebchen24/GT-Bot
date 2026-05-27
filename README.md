@@ -1,4 +1,4 @@
-# GT Role Bot V5.5
+# GT Role Bot V5.6
 
 Discord.js v14 bot for GT role utilities, earnings roles, signup checks and post-cup Twitch proof checks.
 
@@ -52,5 +52,12 @@ npm start
 After deploy the logs should show:
 
 ```txt
-GT ROLE BOT V5.5 LOADED
+GT ROLE BOT V5.6 LOADED
 ```
+
+
+## V5.6 Important
+
+Use `/postcupcheck` for the post-cup Twitch proof check. It only asks for `twitch_channel`, `hours`, and `limit`. It does not use a sign-in channel.
+
+`/checksignup` remains the pre-cup command and still needs both the sign-in channel and the Twitch channel.
