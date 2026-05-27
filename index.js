@@ -88,12 +88,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('checkstreamproof')
-    .setDescription('After cup: checks signed-in players for live status or recent Twitch VODs.')
-    .addChannelOption(option => option
-      .setName('signin_channel')
-      .setDescription('Channel with sign-ins / Discord mentions')
-      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-      .setRequired(true))
+    .setDescription('After cup: checks Twitch links from one channel for live status or recent VODs.')
     .addChannelOption(option => option
       .setName('twitch_channel')
       .setDescription('Channel with Discord names + Twitch links')
@@ -109,7 +104,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 async function registerCommands() {
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
   console.log('Slash commands registered.');
-  console.log('GT Role Bot V5.4 command set active.');
+  console.log('GT Role Bot V5.5 command set active.');
 }
 
 function normalizeTwitchName(value) {
@@ -325,6 +320,57 @@ function findNamedSignedInUsers(content, signedInUsers, keysByUser) {
   return matches.length === 1 ? matches : [];
 }
 
+
+function extractTwitchLinkMatches(content) {
+  const matches = [];
+  const regex = /(?:https?:\/\/)?(?:www\.)?twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#\s]|$)/gi;
+  let match;
+  while ((match = regex.exec(content)) !== null) {
+    const name = normalizeTwitchName(match[1]);
+    if (name && !['directory', 'videos', 'settings', 'popout'].includes(name)) {
+      matches.push({ name, index: match.index });
+    }
+  }
+  return matches;
+}
+
+function cleanRegistrationLabel(value) {
+  return String(value || '')
+    .replace(/<@!?\d+>/g, '')
+    .replace(/(?:https?:\/\/)?(?:www\.)?twitch\.tv\/([a-zA-Z0-9_]{3,25})(?:[/?#\s]|$)/gi, '')
+    .replace(/[`*_~>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[-–—:|•\s]+|[-–—:|•\s]+$/g, '')
+    .trim();
+}
+
+async function buildTwitchProofData(twitchChannel, limit) {
+  const twitchMessages = await fetchMessages(twitchChannel, limit);
+  const registrations = new Map();
+
+  for (const message of twitchMessages) {
+    const links = extractTwitchLinkMatches(message.content);
+    if (!links.length) continue;
+
+    const mentions = [...message.mentions.users.values()].filter(user => !user.bot);
+    const mentionLabel = mentions.length ? mentions.map(user => `${user}`).join(', ') : null;
+
+    for (const link of links) {
+      if (!registrations.has(link.name)) {
+        const beforeLink = message.content.slice(0, link.index);
+        const textLabel = cleanRegistrationLabel(beforeLink) || cleanRegistrationLabel(message.content);
+        registrations.set(link.name, {
+          twitch: link.name,
+          label: mentionLabel || textLabel || `twitch.tv/${link.name}`,
+          messageUrl: message.url
+        });
+      }
+    }
+  }
+
+  return { registrations: [...registrations.values()], twitchMessagesScanned: twitchMessages.length };
+}
+
 async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
   const signinMessages = await fetchMessages(signinChannel, limit);
   const twitchMessages = await fetchMessages(twitchChannel, limit);
@@ -400,7 +446,7 @@ async function sendChannelNotice(channel, content) {
 
 client.once('clientReady', () => {
   console.log('==============================');
-  console.log('GT ROLE BOT V5.4 LOADED');
+  console.log('GT ROLE BOT V5.5 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
   console.log('If you still see line numbers from older versions, another Render service is still running.');
   console.log('==============================');
@@ -556,67 +602,34 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (interaction.commandName === 'checkstreamproof') {
-      const signinChannel = validateTextChannel(interaction.options.getChannel('signin_channel'), 'sign-in channel');
       const twitchChannel = validateTextChannel(interaction.options.getChannel('twitch_channel'), 'Twitch channel');
       const hours = interaction.options.getInteger('hours') || 24;
       const limit = interaction.options.getInteger('limit') || 1000;
 
-      const data = await buildSignupData(interaction.guild, signinChannel, twitchChannel, limit);
-      const {
-        signedInUsers,
-        twitchByUser,
-        allLinks,
-        looseLinks,
-        signinsMissingTwitch,
-        twitchWithoutSignin,
-        signinMessagesScanned,
-        twitchMessagesScanned
-      } = data;
-
-      const matchedEntries = [...twitchByUser.values()].filter(entry => signedInUsers.has(entry.user.id));
-      const usernamesToCheck = new Set();
-      for (const entry of matchedEntries) {
-        for (const link of entry.links) usernamesToCheck.add(link);
-      }
-
-      const results = await checkTwitchUsers([...usernamesToCheck], hours);
+      const { registrations, twitchMessagesScanned } = await buildTwitchProofData(twitchChannel, limit);
+      const usernamesToCheck = registrations.map(entry => entry.twitch);
+      const results = await checkTwitchUsers(usernamesToCheck, hours);
 
       const live = [];
       const vod = [];
       const none = [];
       const notFound = [];
 
-      for (const entry of matchedEntries) {
-        const links = [...entry.links];
-        const statuses = links.map(link => ({ link, result: results.get(link) || { status: 'none' } }));
-
-        const liveResult = statuses.find(item => item.result.status === 'live');
-        const vodResult = statuses.find(item => item.result.status === 'vod');
-        const notFoundOnly = statuses.every(item => item.result.status === 'not_found');
-
-        if (liveResult) {
-          live.push({ user: entry.user, link: liveResult.link });
-        } else if (vodResult) {
-          vod.push({ user: entry.user, link: vodResult.link, vodUrl: vodResult.result.vodUrl });
-        } else if (notFoundOnly) {
-          notFound.push({ user: entry.user, links });
-        } else {
-          none.push({ user: entry.user, links });
-        }
+      for (const entry of registrations) {
+        const result = results.get(entry.twitch) || { status: 'none' };
+        if (result.status === 'live') live.push(entry);
+        else if (result.status === 'vod') vod.push({ ...entry, vodUrl: result.vodUrl });
+        else if (result.status === 'not_found') notFound.push(entry);
+        else none.push(entry);
       }
 
-      const shortNotice = `✅ Post-cup stream proof check done. Checked ${signedInUsers.size} sign-ins. ${matchedEntries.length} Twitch registrations checked. Live: ${live.length}. VOD: ${vod.length}. No proof: ${none.length}. Details are in ${interaction.channel}.`;
-      await sendChannelNotice(signinChannel, shortNotice);
-      if (twitchChannel.id !== signinChannel.id) await sendChannelNotice(twitchChannel, shortNotice);
+      const shortNotice = `✅ Post-cup stream proof check done. Checked ${registrations.length} Twitch links. Live: ${live.length}. VOD: ${vod.length}. No proof: ${none.length}. Details are in ${interaction.channel}.`;
+      await sendChannelNotice(twitchChannel, shortNotice);
 
       const lines = [
         '**Post-Cup Stream Proof Check**',
-        `Checked ${signedInUsers.size} sign-ins.`,
-        `${allLinks.size} Twitch streams/links are in the Twitch channel.`,
-        `${matchedEntries.length} signed-in players have a matched Twitch registration.`,
-        `${signinsMissingTwitch.length} signed-in players are missing a Twitch registration.`,
-        '',
-        `Messages scanned: ${signinMessagesScanned} sign-in messages, ${twitchMessagesScanned} Twitch messages.`,
+        `Checked ${registrations.length} Twitch links from ${twitchChannel}.`,
+        `Messages scanned: ${twitchMessagesScanned}.`,
         `VOD lookback: last ${hours} hours.`,
         '',
         `🟢 Live now: ${live.length}`,
@@ -626,31 +639,19 @@ client.on('interactionCreate', async interaction => {
         ''
       ];
 
-      lines.push('**Missing Twitch registrations:**');
-      lines.push(...(signinsMissingTwitch.length ? signinsMissingTwitch.map(user => `❌ ${user}`) : ['✅ None']));
-
-      lines.push('', '**LIVE NOW:**');
-      lines.push(...(live.length ? live.map(item => `🟢 ${item.user} → twitch.tv/${item.link}`) : ['✅ None']));
+      lines.push('**LIVE NOW:**');
+      lines.push(...(live.length ? live.map(item => `🟢 ${item.label} → twitch.tv/${item.twitch}`) : ['✅ None']));
 
       lines.push('', `**Recent VOD found, last ${hours}h:**`);
-      lines.push(...(vod.length ? vod.map(item => `🟡 ${item.user} → twitch.tv/${item.link}${item.vodUrl ? ` | ${item.vodUrl}` : ''}`) : ['✅ None']));
+      lines.push(...(vod.length ? vod.map(item => `🟡 ${item.label} → twitch.tv/${item.twitch}${item.vodUrl ? ` | ${item.vodUrl}` : ''}`) : ['✅ None']));
 
       lines.push('', '**No stream proof found:**');
-      lines.push(...(none.length ? none.map(item => `🔴 ${item.user} → ${item.links.map(link => `twitch.tv/${link}`).join(', ')}`) : ['✅ None']));
+      lines.push(...(none.length ? none.map(item => `🔴 ${item.label} → twitch.tv/${item.twitch}`) : ['✅ None']));
 
       lines.push('', '**Twitch user not found:**');
-      lines.push(...(notFound.length ? notFound.map(item => `⚠️ ${item.user} → ${item.links.map(link => `twitch.tv/${link}`).join(', ')}`) : ['✅ None']));
+      lines.push(...(notFound.length ? notFound.map(item => `⚠️ ${item.label} → twitch.tv/${item.twitch}`) : ['✅ None']));
 
-      if (twitchWithoutSignin.length) {
-        lines.push('', '**Twitch registrations without sign-in:**');
-        lines.push(...twitchWithoutSignin.map(entry => `⚠️ ${entry.user} → ${[...entry.links].map(link => `twitch.tv/${link}`).join(', ')}`));
-      }
-
-      if (looseLinks.size) {
-        lines.push('', '**Loose Twitch links not assigned to a Discord sign-in:**');
-        lines.push(...[...looseLinks].map(link => `⚠️ twitch.tv/${link}`));
-      }
-
+      lines.push('', '**Expected Twitch channel format:** `DiscordName twitch.tv/twitchname` or `@DiscordName twitch.tv/twitchname`');
       return replyLong(interaction, '', lines, false);
     }
   } catch (error) {

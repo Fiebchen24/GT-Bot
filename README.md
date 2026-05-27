@@ -1,4 +1,4 @@
-# GT Role Bot V5.4
+# GT Role Bot V5.5
 
 Discord.js v14 bot for GT role utilities, earnings roles, signup checks and post-cup Twitch proof checks.
 
@@ -21,16 +21,14 @@ The full report is posted in the command channel. Short notices are posted into 
 ## Post-cup stream proof check
 
 Use `/checkstreamproof` with:
-- `signin_channel`
-- `twitch_channel`
+- `twitch_channel`: channel where Twitch registrations contain `DiscordName twitch.tv/twitchname` or `@Player twitch.tv/twitchname`
 - `hours`: VOD lookback window, default 24 hours
 
-The bot checks matched signed-in players and reports:
+The post-cup check does **not** compare sign-ins. It only checks the Twitch links in the selected Twitch channel and reports:
 - live now
 - recent Twitch VOD found
 - no stream proof found
 - Twitch user not found
-- missing Twitch registrations
 
 ## Required Render environment variables
 
@@ -54,5 +52,5 @@ npm start
 After deploy the logs should show:
 
 ```txt
-GT ROLE BOT V5.4 LOADED
+GT ROLE BOT V5.5 LOADED
 ```
