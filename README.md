@@ -41,3 +41,8 @@ These count as proof:
 PlayerName DC
 PlayerName DC ss
 ```
+
+
+## V6.6
+- Added `/voicechanneldeleteall` to delete all voice channels in a selected category.
+- Optional `name_prefix` lets you delete only channels starting with a specific base name.

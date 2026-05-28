@@ -13,7 +13,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V6.5 LOADED');
+console.log('GT ROLE BOT V6.6 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -84,6 +84,13 @@ const commands = [
     .setName('voicechanneldelete')
     .setDescription('Delete a selected voice channel.')
     .addChannelOption(o => o.setName('channel').setDescription('Voice channel to delete').addChannelTypes(ChannelType.GuildVoice).setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+
+  new SlashCommandBuilder()
+    .setName('voicechanneldeleteall')
+    .setDescription('Delete all voice channels in a selected category.')
+    .addChannelOption(o => o.setName('category').setDescription('Category to delete voice channels from').addChannelTypes(ChannelType.GuildCategory).setRequired(true))
+    .addStringOption(o => o.setName('name_prefix').setDescription('Optional: only delete voice channels starting with this name'))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
 ].map(c => c.toJSON());
 
@@ -525,6 +532,46 @@ async function handleVoiceDelete(interaction) {
   await safeEdit(interaction, `Deleted voice channel: ${name}`);
 }
 
+async function handleVoiceDeleteAll(interaction) {
+  const category = interaction.options.getChannel('category');
+  const prefixRaw = interaction.options.getString('name_prefix');
+  const prefix = prefixRaw ? prefixRaw.trim().toLowerCase() : null;
+
+  if (!category || category.type !== ChannelType.GuildCategory) {
+    return safeEdit(interaction, 'Error: Please select a valid category.');
+  }
+
+  const voiceChannels = interaction.guild.channels.cache
+    .filter(channel => channel.type === ChannelType.GuildVoice && channel.parentId === category.id)
+    .filter(channel => !prefix || channel.name.toLowerCase().startsWith(prefix));
+
+  if (!voiceChannels.size) {
+    const prefixText = prefixRaw ? ` with prefix "${prefixRaw}"` : '';
+    return safeEdit(interaction, `No voice channels found in ${category}${prefixText}.`);
+  }
+
+  const deleted = [];
+  const failed = [];
+
+  for (const channel of voiceChannels.values()) {
+    const name = channel.name;
+    try {
+      await channel.delete('Deleted by GT Role Bot delete-all command');
+      deleted.push(name);
+    } catch (error) {
+      failed.push(`${name} (${error.message})`);
+      console.error(`Failed to delete voice channel ${name}:`, error.message);
+    }
+  }
+
+  const lines = [];
+  lines.push(`Deleted ${deleted.length} voice channels from ${category}. Failed: ${failed.length}.`);
+  if (deleted.length) lines.push('', '**Deleted:**', ...deleted.map(name => `✅ ${name}`));
+  if (failed.length) lines.push('', '**Failed:**', ...failed.map(name => `❌ ${name}`));
+
+  await sendLongReply(interaction, lines.join('\n'));
+}
+
 client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
@@ -543,6 +590,7 @@ client.on('interactionCreate', async interaction => {
       case 'postcupcheck': return handlePostCupCheck(interaction);
       case 'voicechannelcreate': return handleVoiceCreate(interaction);
       case 'voicechanneldelete': return handleVoiceDelete(interaction);
+      case 'voicechanneldeleteall': return handleVoiceDeleteAll(interaction);
       default: return safeEdit(interaction, 'Unknown command.');
     }
   } catch (error) {
