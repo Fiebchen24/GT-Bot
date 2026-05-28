@@ -13,7 +13,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V6.4 LOADED');
+console.log('GT ROLE BOT V6.5 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -478,9 +478,9 @@ async function handlePostCupCheck(interaction) {
   lines.push(`No proof found: ${none.length}.`);
   lines.push(`Twitch user not found: ${notFound.length}.`);
   lines.push('');
-  if (live.length) lines.push(`**Live now:**\n${live.map(n => `GREEN ${n}`).join('\n')}`);
-  if (vod.length) lines.push(`\n**Recent VOD found:**\n${vod.map(n => `YELLOW ${n}`).join('\n')}`);
-  if (none.length) lines.push(`\n**No Twitch proof found:**\n${none.map(n => `RED ${n}`).join('\n')}`);
+  if (live.length) lines.push(`**Live now:**\n${live.map(n => `🟢 ${n}`).join('\n')}`);
+  if (vod.length) lines.push(`\n**Recent VOD found:**\n${vod.map(n => `🟡 ${n}`).join('\n')}`);
+  if (none.length) lines.push(`\n**No Twitch proof found:**\n${none.map(n => `🔴 ${n}`).join('\n')}`);
   if (notFound.length) lines.push(`\n**Twitch user not found:**\n${notFound.map(n => `WARN ${n}`).join('\n')}`);
 
   await sendLongReply(interaction, lines.join('\n'));
