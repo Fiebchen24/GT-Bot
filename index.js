@@ -149,7 +149,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 async function registerCommands() {
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
   console.log('Slash commands registered.');
-  console.log('GT Role Bot V5.9 command set active.');
+  console.log('GT Role Bot V6 command set active.');
 }
 
 function normalizeTwitchName(value) {
@@ -468,24 +468,63 @@ function findBestUserForTwitch(twitchName, signedInUsers, keysByUser) {
   return bestUser;
 }
 
+function extractMentionIdsFromLine(line) {
+  const ids = [];
+  const regex = /<@!?(\d+)>/g;
+  let match;
+  while ((match = regex.exec(line)) !== null) ids.push(match[1]);
+  return ids;
+}
+
+function buildSigninTeams(signinMessages) {
+  const signedInUsers = new Map();
+  const teams = [];
+  const seenTeamKeys = new Set();
+
+  for (const message of signinMessages) {
+    const lines = String(message.content || '').split(/\r?\n/);
+
+    for (const line of lines) {
+      const ids = [...new Set(extractMentionIdsFromLine(line))];
+      const users = ids
+        .map(id => message.mentions.users.get(id))
+        .filter(user => user && !user.bot);
+
+      if (!users.length) continue;
+
+      for (const user of users) signedInUsers.set(user.id, user);
+
+      // One line = one team. For duos/trios/squads, only one player on the line needs proof.
+      const teamKey = users.map(user => user.id).sort().join('-');
+      if (!seenTeamKeys.has(teamKey)) {
+        seenTeamKeys.add(teamKey);
+        teams.push({ users, messageUrl: message.url, raw: line.trim() });
+      }
+    }
+  }
+
+  return { signedInUsers, teams };
+}
+
+function teamHasProof(team, twitchByUser) {
+  return team.users.some(user => twitchByUser.has(user.id));
+}
+
+function formatTeam(team) {
+  return team.users.map(user => `${user}`).join(' + ');
+}
+
 async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
   const signinMessages = await fetchMessages(signinChannel, limit);
   const twitchMessages = await fetchMessages(twitchChannel, limit);
 
-  const signedInUsers = new Map();
+  const { signedInUsers, teams: signinTeams } = buildSigninTeams(signinMessages);
   const twitchByUser = new Map();
   const looseLinks = new Set();
   const allLinks = new Set();
   const nameMatched = [];
   const dcScreenshares = [];
   const looseDcScreenshares = [];
-
-  // Sign-in channel: every @mention is a signed-in player.
-  for (const message of signinMessages) {
-    for (const user of message.mentions.users.values()) {
-      if (!user.bot) signedInUsers.set(user.id, user);
-    }
-  }
 
   // Keys for matching @DiscordName to twitch.tv/name or plain "DiscordName DC ss".
   const keysByUser = new Map();
@@ -552,11 +591,16 @@ async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
     }
   }
 
+  const teamsMissingTwitch = signinTeams.filter(team => !teamHasProof(team, twitchByUser));
+  const matchedTeams = signinTeams.filter(team => teamHasProof(team, twitchByUser));
   const signinsMissingTwitch = [...signedInUsers.values()].filter(user => !twitchByUser.has(user.id));
   const twitchWithoutSignin = [...twitchByUser.values()].filter(entry => !signedInUsers.has(entry.user.id));
 
   return {
     signedInUsers,
+    signinTeams,
+    matchedTeams,
+    teamsMissingTwitch,
     twitchByUser,
     allLinks,
     looseLinks,
@@ -580,7 +624,7 @@ async function sendChannelNotice(channel, content) {
 
 client.once('clientReady', () => {
   console.log('==============================');
-  console.log('GT ROLE BOT V5.9 LOADED');
+  console.log('GT ROLE BOT V6 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
   console.log('If you still see line numbers from older versions, another Render service is still running.');
   console.log('==============================');
@@ -735,39 +779,42 @@ User limit: ${userLimit === 0 ? 'No limit' : userLimit}`);
       const data = await buildSignupData(interaction.guild, signinChannel, twitchChannel, limit);
       const {
         signedInUsers,
+        signinTeams,
+        matchedTeams,
+        teamsMissingTwitch,
         twitchByUser,
         allLinks,
         looseLinks,
         dcScreenshares,
         looseDcScreenshares,
-        signinsMissingTwitch,
         twitchWithoutSignin,
         signinMessagesScanned,
         twitchMessagesScanned
       } = data;
 
-      const matchedCount = [...signedInUsers.keys()].filter(userId => twitchByUser.has(userId)).length;
+      const matchedCount = matchedTeams.length;
+      const totalPlayers = signedInUsers.size;
 
       // Short notices in the scanned channels, as requested.
-      const shortNotice = `✅ Signup check done. Checked ${signedInUsers.size} sign-ins. ${allLinks.size} Twitch links + ${dcScreenshares.length} DC SS found. Missing: ${signinsMissingTwitch.length}. Details are in ${interaction.channel}.`;
+      const shortNotice = `✅ Signup check done. Checked ${signinTeams.length} teams / ${totalPlayers} players. ${allLinks.size} Twitch links + ${dcScreenshares.length} DC SS found. Missing teams: ${teamsMissingTwitch.length}. Details are in ${interaction.channel}.`;
       await sendChannelNotice(signinChannel, shortNotice);
       if (twitchChannel.id !== signinChannel.id) await sendChannelNotice(twitchChannel, shortNotice);
 
       // Main result goes publicly into the command channel. Only show problems, not the users that passed.
       const lines = [
         '**Signup Check**',
-        `Checked ${signedInUsers.size} sign-ins.`,
+        `Checked ${signinTeams.length} sign-in teams / ${totalPlayers} players.`,
         `${allLinks.size} Twitch streams/links are in the Twitch channel.`,
         `${dcScreenshares.length} Discord screenshares are counted.`,
-        `${matchedCount} are matched.`,
-        `${signinsMissingTwitch.length} are missing.`,
+        `${matchedCount} teams are matched.`,
+        `${teamsMissingTwitch.length} teams are missing proof.`,
         '',
         `Messages scanned: ${signinMessagesScanned} sign-in messages, ${twitchMessagesScanned} Twitch messages.`,
         '',
         '**Missing Twitch links:**'
       ];
 
-      lines.push(...(signinsMissingTwitch.length ? signinsMissingTwitch.map(user => `❌ ${user}`) : ['✅ None']));
+      lines.push(...(teamsMissingTwitch.length ? teamsMissingTwitch.map(team => `❌ ${formatTeam(team)}`) : ['✅ None']));
 
       if (twitchWithoutSignin.length) {
         lines.push('', '**Twitch registrations without sign-in:**');
@@ -784,7 +831,7 @@ User limit: ${userLimit === 0 ? 'No limit' : userLimit}`);
         lines.push(...looseDcScreenshares.map(label => `⚠️ ${label} → DC SS`));
       }
 
-      lines.push('', '**Matching rule:** Sign-in is `@DiscordName`. Twitch proof is matched by the name after `twitch.tv/name`. `DC ss` / `Discord screenshare` in the Twitch channel also counts.');
+      lines.push('', '**Matching rule:** One sign-in line = one team. If several players are in one line, only one player from that team needs a Twitch link or `DC ss`. Twitch proof is matched by the name after `twitch.tv/name`.');
       return replyLong(interaction, '', lines, false);
     }
 
