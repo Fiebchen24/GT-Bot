@@ -70,6 +70,39 @@ const commands = [
     .addIntegerOption(scanLimitOption)
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
+
+
+  new SlashCommandBuilder()
+    .setName('voicechannelcreate')
+    .setDescription('Creates a voice channel in a selected category.')
+    .addChannelOption(option => option
+      .setName('category')
+      .setDescription('Category where the voice channel should be created')
+      .addChannelTypes(ChannelType.GuildCategory)
+      .setRequired(true))
+    .addStringOption(option => option
+      .setName('name')
+      .setDescription('Name of the new voice channel')
+      .setMaxLength(100)
+      .setRequired(true))
+    .addIntegerOption(option => option
+      .setName('user_limit')
+      .setDescription('Optional user limit. 0 = no limit')
+      .setMinValue(0)
+      .setMaxValue(99)
+      .setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+
+  new SlashCommandBuilder()
+    .setName('voicechanneldelete')
+    .setDescription('Deletes a selected voice channel.')
+    .addChannelOption(option => option
+      .setName('voice_channel')
+      .setDescription('Voice channel to delete')
+      .addChannelTypes(ChannelType.GuildVoice)
+      .setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+
   new SlashCommandBuilder()
     .setName('checksignup')
     .setDescription('Before cup: checks sign-ins against Twitch registrations.')
@@ -116,7 +149,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 async function registerCommands() {
   await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands });
   console.log('Slash commands registered.');
-  console.log('GT Role Bot V5.6 command set active.');
+  console.log('GT Role Bot V5.9 command set active.');
 }
 
 function normalizeTwitchName(value) {
@@ -144,6 +177,14 @@ function extractTwitchLinks(content) {
     if (name && !['directory', 'videos', 'settings', 'popout'].includes(name)) found.add(name);
   }
   return [...found];
+}
+
+function hasDiscordScreenshare(content) {
+  return /\b(?:dc|discord)\s*(?:ss|screen\s*share|screenshare)\b/i.test(String(content || ''));
+}
+
+function getDiscordScreenshareLabel(content) {
+  return cleanRegistrationLabel(String(content || '').replace(/\b(?:dc|discord)\s*(?:ss|screen\s*share|screenshare)\b/ig, '')) || 'Discord screenshare';
 }
 
 function validateTextChannel(channel, label = 'channel') {
@@ -359,10 +400,12 @@ function cleanRegistrationLabel(value) {
 async function buildTwitchProofData(twitchChannel, limit) {
   const twitchMessages = await fetchMessages(twitchChannel, limit);
   const registrations = new Map();
+  const dcScreenshares = [];
 
   for (const message of twitchMessages) {
     const links = extractTwitchLinkMatches(message.content);
-    if (!links.length) continue;
+    const hasDcSs = hasDiscordScreenshare(message.content);
+    if (!links.length && !hasDcSs) continue;
 
     const mentions = [...message.mentions.users.values()].filter(user => !user.bot);
     const mentionLabel = mentions.length ? mentions.map(user => `${user}`).join(', ') : null;
@@ -378,9 +421,51 @@ async function buildTwitchProofData(twitchChannel, limit) {
         });
       }
     }
+
+    if (hasDcSs && !links.length) {
+      dcScreenshares.push({
+        label: mentionLabel || getDiscordScreenshareLabel(message.content),
+        messageUrl: message.url
+      });
+    }
   }
 
-  return { registrations: [...registrations.values()], twitchMessagesScanned: twitchMessages.length };
+  return { registrations: [...registrations.values()], dcScreenshares, twitchMessagesScanned: twitchMessages.length };
+}
+
+function matchScore(twitchName, keys) {
+  const tw = normalizeName(twitchName);
+  if (tw.length < 3) return 0;
+
+  let best = 0;
+  for (const key of keys || []) {
+    if (!key || key.length < 3) continue;
+    if (tw === key) best = Math.max(best, 100);
+    else if (tw.startsWith(key) || key.startsWith(tw)) best = Math.max(best, 85);
+    else if (tw.includes(key) || key.includes(tw)) best = Math.max(best, 65);
+  }
+  return best;
+}
+
+function findBestUserForTwitch(twitchName, signedInUsers, keysByUser) {
+  let bestUser = null;
+  let bestScore = 0;
+  let tied = false;
+
+  for (const [userId, user] of signedInUsers.entries()) {
+    const score = matchScore(twitchName, keysByUser.get(userId));
+    if (score > bestScore) {
+      bestUser = user;
+      bestScore = score;
+      tied = false;
+    } else if (score > 0 && score === bestScore) {
+      tied = true;
+    }
+  }
+
+  // If two signed-in users match the same Twitch name equally, do not guess.
+  if (!bestUser || bestScore < 65 || tied) return null;
+  return bestUser;
 }
 
 async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
@@ -392,6 +477,8 @@ async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
   const looseLinks = new Set();
   const allLinks = new Set();
   const nameMatched = [];
+  const dcScreenshares = [];
+  const looseDcScreenshares = [];
 
   // Sign-in channel: every @mention is a signed-in player.
   for (const message of signinMessages) {
@@ -400,35 +487,68 @@ async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
     }
   }
 
-  // Prepare display-name keys for plain-text matching in the Twitch channel.
+  // Keys for matching @DiscordName to twitch.tv/name or plain "DiscordName DC ss".
   const keysByUser = new Map();
-  for (const user of signedInUsers.values()) keysByUser.set(user.id, await getMemberKeys(guild, user));
+  for (const user of signedInUsers.values()) {
+    keysByUser.set(user.id, await getMemberKeys(guild, user));
+  }
 
   for (const message of twitchMessages) {
     const links = extractTwitchLinks(message.content);
-    if (!links.length) continue;
+    const hasDcSs = hasDiscordScreenshare(message.content);
+    if (!links.length && !hasDcSs) continue;
+
     links.forEach(link => allLinks.add(link));
 
-    let users = [...message.mentions.users.values()].filter(user => !user.bot);
+    const mentionedUsers = [...message.mentions.users.values()].filter(user => !user.bot);
+    const mentionedSignedInUsers = mentionedUsers.filter(user => signedInUsers.has(user.id));
 
-    // If the Twitch channel has no @mention but contains the Discord name as text,
-    // match it against the signed-in users' username / server nickname / display name.
-    if (users.length === 0) {
-      users = findNamedSignedInUsers(message.content, signedInUsers, keysByUser);
-      if (users.length === 1) {
-        for (const link of links) nameMatched.push({ user: users[0], link });
+    // Discord screenshare is allowed instead of a Twitch link.
+    // Examples supported in the Twitch channel:
+    // @Player DC ss
+    // PlayerName DC ss
+    // PlayerName discord screenshare
+    if (hasDcSs) {
+      let ssMatchedUsers = mentionedSignedInUsers;
+
+      if (!ssMatchedUsers.length) {
+        ssMatchedUsers = findNamedSignedInUsers(message.content, signedInUsers, keysByUser);
+      }
+
+      if (ssMatchedUsers.length) {
+        for (const user of ssMatchedUsers) {
+          addUniqueMap(twitchByUser, user, 'DC SS');
+          dcScreenshares.push({ user, label: getDiscordScreenshareLabel(message.content) });
+        }
+      } else {
+        looseDcScreenshares.push(getDiscordScreenshareLabel(message.content));
       }
     }
 
-    if (users.length > 0) {
-      // @User twitch.tv/name OR DiscordName twitch.tv/name.
-      // If there are multiple links in one message, keep all links on each matched user.
-      for (const user of users) {
-        for (const link of links) addUniqueMap(twitchByUser, user, link);
+    for (const link of links) {
+      let matchedUsers = [];
+
+      // Best case: Twitch channel line contains @DiscordName twitch.tv/name.
+      // Only count mentioned users that are actually signed in.
+      if (mentionedSignedInUsers.length) {
+        matchedUsers = mentionedSignedInUsers;
       }
-    } else {
-      // Link found but we cannot safely assign it to a signed-in Discord user.
-      links.forEach(link => looseLinks.add(link));
+
+      // Main requested logic: sign-in is @name, Twitch link has name after .tv/name.
+      // Match the Twitch username against signed-in Discord display/user/server names.
+      if (!matchedUsers.length) {
+        const bestUser = findBestUserForTwitch(link, signedInUsers, keysByUser);
+        if (bestUser) {
+          matchedUsers = [bestUser];
+          nameMatched.push({ user: bestUser, link });
+        }
+      }
+
+      if (matchedUsers.length) {
+        for (const user of matchedUsers) addUniqueMap(twitchByUser, user, link);
+      } else {
+        looseLinks.add(link);
+      }
     }
   }
 
@@ -441,6 +561,8 @@ async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
     allLinks,
     looseLinks,
     nameMatched,
+    dcScreenshares,
+    looseDcScreenshares,
     signinsMissingTwitch,
     twitchWithoutSignin,
     signinMessagesScanned: signinMessages.length,
@@ -458,7 +580,7 @@ async function sendChannelNotice(channel, content) {
 
 client.once('clientReady', () => {
   console.log('==============================');
-  console.log('GT ROLE BOT V5.6 LOADED');
+  console.log('GT ROLE BOT V5.9 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
   console.log('If you still see line numbers from older versions, another Render service is still running.');
   console.log('==============================');
@@ -488,8 +610,13 @@ client.on('interactionCreate', async interaction => {
     return;
   }
 
-  if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
-    return interaction.editReply('You need Manage Roles permission to use this command.');
+  const channelManagementCommands = ['voicechannelcreate', 'voicechanneldelete'];
+  const needsManageChannels = channelManagementCommands.includes(interaction.commandName);
+  const requiredPermission = needsManageChannels ? PermissionFlagsBits.ManageChannels : PermissionFlagsBits.ManageRoles;
+  const requiredPermissionName = needsManageChannels ? 'Manage Channels' : 'Manage Roles';
+
+  if (!interaction.member.permissions.has(requiredPermission)) {
+    return interaction.editReply(`You need ${requiredPermissionName} permission to use this command.`);
   }
 
   try {
@@ -560,6 +687,46 @@ client.on('interactionCreate', async interaction => {
       return interaction.editReply(`Done.\nMessages scanned: ${messages.length}\nUpdated: ${updated}\nAlready correct: ${alreadyCorrect}\nSkipped: ${skipped}\nFailed: ${failed}`);
     }
 
+
+    if (interaction.commandName === 'voicechannelcreate') {
+      const category = interaction.options.getChannel('category');
+      const name = interaction.options.getString('name', true).trim();
+      const userLimit = interaction.options.getInteger('user_limit') ?? 0;
+
+      if (!category || category.type !== ChannelType.GuildCategory) {
+        return interaction.editReply('Error: Please select a valid category.');
+      }
+
+      if (!name) {
+        return interaction.editReply('Error: Please enter a valid channel name.');
+      }
+
+      const created = await interaction.guild.channels.create({
+        name,
+        type: ChannelType.GuildVoice,
+        parent: category.id,
+        userLimit,
+        reason: `Created by ${interaction.user.tag} using /voicechannelcreate`
+      });
+
+      return interaction.editReply(`✅ Voice channel created: ${created}
+Category: ${category.name}
+User limit: ${userLimit === 0 ? 'No limit' : userLimit}`);
+    }
+
+    if (interaction.commandName === 'voicechanneldelete') {
+      const voiceChannel = interaction.options.getChannel('voice_channel');
+
+      if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
+        return interaction.editReply('Error: Please select a valid voice channel.');
+      }
+
+      const channelName = voiceChannel.name;
+      await voiceChannel.delete(`Deleted by ${interaction.user.tag} using /voicechanneldelete`);
+
+      return interaction.editReply(`✅ Voice channel deleted: ${channelName}`);
+    }
+
     if (interaction.commandName === 'checksignup') {
       const signinChannel = validateTextChannel(interaction.options.getChannel('signin_channel'), 'sign-in channel');
       const twitchChannel = validateTextChannel(interaction.options.getChannel('twitch_channel'), 'Twitch channel');
@@ -571,6 +738,8 @@ client.on('interactionCreate', async interaction => {
         twitchByUser,
         allLinks,
         looseLinks,
+        dcScreenshares,
+        looseDcScreenshares,
         signinsMissingTwitch,
         twitchWithoutSignin,
         signinMessagesScanned,
@@ -580,7 +749,7 @@ client.on('interactionCreate', async interaction => {
       const matchedCount = [...signedInUsers.keys()].filter(userId => twitchByUser.has(userId)).length;
 
       // Short notices in the scanned channels, as requested.
-      const shortNotice = `✅ Signup check done. Checked ${signedInUsers.size} sign-ins. ${allLinks.size} Twitch links found. Missing: ${signinsMissingTwitch.length}. Details are in ${interaction.channel}.`;
+      const shortNotice = `✅ Signup check done. Checked ${signedInUsers.size} sign-ins. ${allLinks.size} Twitch links + ${dcScreenshares.length} DC SS found. Missing: ${signinsMissingTwitch.length}. Details are in ${interaction.channel}.`;
       await sendChannelNotice(signinChannel, shortNotice);
       if (twitchChannel.id !== signinChannel.id) await sendChannelNotice(twitchChannel, shortNotice);
 
@@ -589,6 +758,7 @@ client.on('interactionCreate', async interaction => {
         '**Signup Check**',
         `Checked ${signedInUsers.size} sign-ins.`,
         `${allLinks.size} Twitch streams/links are in the Twitch channel.`,
+        `${dcScreenshares.length} Discord screenshares are counted.`,
         `${matchedCount} are matched.`,
         `${signinsMissingTwitch.length} are missing.`,
         '',
@@ -609,7 +779,12 @@ client.on('interactionCreate', async interaction => {
         lines.push(...[...looseLinks].map(link => `⚠️ twitch.tv/${link}`));
       }
 
-      lines.push('', '**Expected Twitch channel format:** `DiscordName twitch.tv/twitchname` or `@DiscordName twitch.tv/twitchname`');
+      if (looseDcScreenshares.length) {
+        lines.push('', '**DC SS entries not safely assigned to a Discord sign-in:**');
+        lines.push(...looseDcScreenshares.map(label => `⚠️ ${label} → DC SS`));
+      }
+
+      lines.push('', '**Matching rule:** Sign-in is `@DiscordName`. Twitch proof is matched by the name after `twitch.tv/name`. `DC ss` / `Discord screenshare` in the Twitch channel also counts.');
       return replyLong(interaction, '', lines, false);
     }
 
@@ -618,7 +793,7 @@ client.on('interactionCreate', async interaction => {
       const hours = interaction.options.getInteger('hours') || 24;
       const limit = interaction.options.getInteger('limit') || 1000;
 
-      const { registrations, twitchMessagesScanned } = await buildTwitchProofData(twitchChannel, limit);
+      const { registrations, dcScreenshares, twitchMessagesScanned } = await buildTwitchProofData(twitchChannel, limit);
       const usernamesToCheck = registrations.map(entry => entry.twitch);
       const results = await checkTwitchUsers(usernamesToCheck, hours);
 
@@ -635,12 +810,12 @@ client.on('interactionCreate', async interaction => {
         else none.push(entry);
       }
 
-      const shortNotice = `✅ Post-cup stream proof check done. Checked ${registrations.length} Twitch links. Live: ${live.length}. VOD: ${vod.length}. No proof: ${none.length}. Details are in ${interaction.channel}.`;
+      const shortNotice = `✅ Post-cup stream proof check done. Checked ${registrations.length} Twitch links + ${dcScreenshares.length} DC SS entries. Live: ${live.length}. VOD: ${vod.length}. No proof: ${none.length}. Details are in ${interaction.channel}.`;
       await sendChannelNotice(twitchChannel, shortNotice);
 
       const lines = [
         '**Post-Cup Stream Proof Check**',
-        `Checked ${registrations.length} Twitch links from ${twitchChannel}.`,
+        `Checked ${registrations.length} Twitch links + ${dcScreenshares.length} DC SS entries from ${twitchChannel}.`,
         `Messages scanned: ${twitchMessagesScanned}.`,
         `VOD lookback: last ${hours} hours.`,
         '',
@@ -648,6 +823,7 @@ client.on('interactionCreate', async interaction => {
         `🟡 Recent VOD found: ${vod.length}`,
         `🔴 No stream proof found: ${none.length}`,
         `⚠️ Twitch user not found: ${notFound.length}`,
+        `🟣 Discord screenshare/manual proof: ${dcScreenshares.length}`,
         ''
       ];
 
@@ -657,13 +833,16 @@ client.on('interactionCreate', async interaction => {
       lines.push('', `**Recent VOD found, last ${hours}h:**`);
       lines.push(...(vod.length ? vod.map(item => `🟡 ${item.label} → twitch.tv/${item.twitch}${item.vodUrl ? ` | ${item.vodUrl}` : ''}`) : ['✅ None']));
 
+      lines.push('', '**Discord screenshare/manual proof:**');
+      lines.push(...(dcScreenshares.length ? dcScreenshares.map(item => `🟣 ${item.label} → DC SS`) : ['✅ None']));
+
       lines.push('', '**No stream proof found:**');
       lines.push(...(none.length ? none.map(item => `🔴 ${item.label} → twitch.tv/${item.twitch}`) : ['✅ None']));
 
       lines.push('', '**Twitch user not found:**');
       lines.push(...(notFound.length ? notFound.map(item => `⚠️ ${item.label} → twitch.tv/${item.twitch}`) : ['✅ None']));
 
-      lines.push('', '**Expected Twitch channel format:** `DiscordName twitch.tv/twitchname` or `@DiscordName twitch.tv/twitchname`');
+      lines.push('', '**Matching rule:** Twitch proof is matched by the name after `twitch.tv/name`. `DC ss` / `Discord screenshare` counts as manual proof.');
       return replyLong(interaction, '', lines, false);
     }
   } catch (error) {
