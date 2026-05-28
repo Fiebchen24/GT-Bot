@@ -91,6 +91,12 @@ const commands = [
       .setMinValue(0)
       .setMaxValue(99)
       .setRequired(false))
+    .addIntegerOption(option => option
+      .setName('amount')
+      .setDescription('How many voice channels to create. Default 1, max 50')
+      .setMinValue(1)
+      .setMaxValue(50)
+      .setRequired(false))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
   new SlashCommandBuilder()
@@ -626,7 +632,7 @@ async function sendChannelNotice(channel, content) {
 
 client.once('clientReady', () => {
   console.log('==============================');
-  console.log('GT ROLE BOT V6.1 LOADED');
+  console.log('GT ROLE BOT V6.2 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
   console.log('If you still see line numbers from older versions, another Render service is still running.');
   console.log('==============================');
@@ -738,6 +744,7 @@ client.on('interactionCreate', async interaction => {
       const category = interaction.options.getChannel('category');
       const name = interaction.options.getString('name', true).trim();
       const userLimit = interaction.options.getInteger('user_limit') ?? 0;
+      const amount = interaction.options.getInteger('amount') ?? 1;
 
       if (!category || category.type !== ChannelType.GuildCategory) {
         return interaction.editReply('Error: Please select a valid category.');
@@ -747,17 +754,50 @@ client.on('interactionCreate', async interaction => {
         return interaction.editReply('Error: Please enter a valid channel name.');
       }
 
-      const created = await interaction.guild.channels.create({
-        name,
-        type: ChannelType.GuildVoice,
-        parent: category.id,
-        userLimit,
-        reason: `Created by ${interaction.user.tag} using /voicechannelcreate`
-      });
+      const createdChannels = [];
+      const failedChannels = [];
 
-      return interaction.editReply(`✅ Voice channel created: ${created}
-Category: ${category.name}
-User limit: ${userLimit === 0 ? 'No limit' : userLimit}`);
+      for (let i = 1; i <= amount; i++) {
+        const channelName = amount === 1 ? name : `${name} ${i}`;
+
+        try {
+          const created = await interaction.guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildVoice,
+            parent: category.id,
+            userLimit,
+            reason: `Created by ${interaction.user.tag} using /voicechannelcreate`
+          });
+
+          createdChannels.push(created);
+        } catch (error) {
+          console.error(`Failed to create voice channel ${channelName}:`, error);
+          failedChannels.push(channelName);
+        }
+      }
+
+      const createdList = createdChannels.map(channel => `✅ ${channel}`).join('
+') || 'None';
+      const failedList = failedChannels.map(channelName => `❌ ${channelName}`).join('
+') || 'None';
+
+      const response = [
+        `Voice channels requested: ${amount}`,
+        `Created: ${createdChannels.length}`,
+        `Failed: ${failedChannels.length}`,
+        `Category: ${category.name}`,
+        `User limit: ${userLimit === 0 ? 'No limit' : userLimit}`,
+        '',
+        'Created channels:',
+        createdList
+      ];
+
+      if (failedChannels.length > 0) {
+        response.push('', 'Failed channels:', failedList);
+      }
+
+      return sendLongInteractionReply(interaction, response.join('
+'));
     }
 
     if (interaction.commandName === 'voicechanneldelete') {

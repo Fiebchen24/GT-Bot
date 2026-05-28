@@ -1,6 +1,6 @@
 {
   "name": "gt-role-bot",
-  "version": "6.1.0",
+  "version": "6.2.0",
   "description": "GT Role Bot with role tools, earnings roles, Twitch signup checks and stream proof checks.",
   "main": "index.js",
   "scripts": {

@@ -52,7 +52,7 @@ npm start
 After deploy the logs should show:
 
 ```txt
-GT ROLE BOT V6.1 LOADED
+GT ROLE BOT V6.2 LOADED
 ```
 
 
@@ -116,7 +116,7 @@ For duos, trios, or squads, only one player in the same sign-in line needs a Twi
 The result lists only missing teams, not players who passed.
 
 
-## V6.1 update
+## V6.2 update
 
 For team signups, one sign-in line counts as one team. This works for duos, trios and squads. Only one player from that line/team needs proof in the Twitch/proof channel.
 
@@ -128,3 +128,23 @@ Discord screenshare proof now supports both formats:
 PlayerName DC
 PlayerName DC ss
 ```
+
+
+## V6.2 Voice Channel Update
+
+`/voicechannelcreate` can now create multiple voice channels at once.
+
+Options:
+- `category`: category where the voice channels will be created
+- `name`: base channel name
+- `user_limit`: optional user limit, 0 = no limit
+- `amount`: how many voice channels to create, max 50
+
+Example:
+`/voicechannelcreate category: Duo Rooms name: Duo Room user_limit: 2 amount: 20`
+
+This creates:
+- Duo Room 1
+- Duo Room 2
+- Duo Room 3
+- ...
