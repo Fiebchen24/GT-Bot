@@ -1,5 +1,8 @@
 require('dotenv').config();
 
+const fs = require('fs');
+const path = require('path');
+
 const {
   Client,
   GatewayIntentBits,
@@ -13,7 +16,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V6.6 LOADED');
+console.log('GT ROLE BOT V6.8 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -91,7 +94,43 @@ const commands = [
     .setDescription('Delete all voice channels in a selected category.')
     .addChannelOption(o => o.setName('category').setDescription('Category to delete voice channels from').addChannelTypes(ChannelType.GuildCategory).setRequired(true))
     .addStringOption(o => o.setName('name_prefix').setDescription('Optional: only delete voice channels starting with this name'))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
+
+  new SlashCommandBuilder()
+    .setName('eventbanadd')
+    .setDescription('Give an event-ban role to one user until a date or for X days.')
+    .addUserOption(o => o.setName('user').setDescription('User to event-ban').setRequired(true))
+    .addRoleOption(o => o.setName('role').setDescription('Event-ban role to give').setRequired(true))
+    .addChannelOption(o => o.setName('log_channel').setDescription('Optional channel for automatic expiry logs').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
+    .addStringOption(o => o.setName('until_date').setDescription('Optional date: YYYY-MM-DD or DD.MM.YYYY'))
+    .addIntegerOption(o => o.setName('days').setDescription('Optional duration in days. Default: 30').setMinValue(1).setMaxValue(365))
+    .addStringOption(o => o.setName('reason').setDescription('Optional reason'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
+    .setName('eventbanfromchannel')
+    .setDescription('Give an event-ban role to everyone mentioned in a channel.')
+    .addChannelOption(o => o.setName('channel').setDescription('Channel with @mentions').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
+    .addRoleOption(o => o.setName('role').setDescription('Event-ban role to give').setRequired(true))
+    .addChannelOption(o => o.setName('log_channel').setDescription('Optional channel for automatic expiry logs').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
+    .addStringOption(o => o.setName('until_date').setDescription('Optional date: YYYY-MM-DD or DD.MM.YYYY'))
+    .addIntegerOption(o => o.setName('days').setDescription('Optional duration in days. Default: 30').setMinValue(1).setMaxValue(365))
+    .addIntegerOption(o => o.setName('limit').setDescription('Messages to scan, max 1000').setMinValue(1).setMaxValue(1000))
+    .addStringOption(o => o.setName('reason').setDescription('Optional reason'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
+    .setName('eventbanremove')
+    .setDescription('Remove an event-ban role from one user and clear the saved expiry.')
+    .addUserOption(o => o.setName('user').setDescription('User to unban').setRequired(true))
+    .addRoleOption(o => o.setName('role').setDescription('Event-ban role to remove').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
+    .setName('eventbanlist')
+    .setDescription('List active saved event bans.')
+    .addRoleOption(o => o.setName('role').setDescription('Optional: only list this event-ban role'))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -178,6 +217,132 @@ async function sendLongReply(interaction, text) {
     try { await interaction.followUp({ content: chunk, flags: MessageFlags.Ephemeral }); }
     catch (error) { console.error('Failed to send follow-up:', error); }
   }
+}
+
+const EVENT_BANS_FILE = path.join(__dirname, 'eventBans.json');
+
+function loadEventBanStore() {
+  try {
+    if (!fs.existsSync(EVENT_BANS_FILE)) return { bans: [] };
+    const parsed = JSON.parse(fs.readFileSync(EVENT_BANS_FILE, 'utf8'));
+    return { bans: Array.isArray(parsed.bans) ? parsed.bans : [] };
+  } catch (error) {
+    console.error('Could not load eventBans.json:', error);
+    return { bans: [] };
+  }
+}
+
+function saveEventBanStore(store) {
+  fs.writeFileSync(EVENT_BANS_FILE, JSON.stringify(store, null, 2));
+}
+
+function parseExpiry(untilDate, days) {
+  if (untilDate) {
+    const value = untilDate.trim();
+    let year, month, day;
+    let match = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (match) {
+      year = Number(match[1]);
+      month = Number(match[2]);
+      day = Number(match[3]);
+    } else {
+      match = value.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+      if (match) {
+        day = Number(match[1]);
+        month = Number(match[2]);
+        year = Number(match[3]);
+      }
+    }
+    if (!year || !month || !day) throw new Error('Invalid date. Use YYYY-MM-DD or DD.MM.YYYY.');
+    const expires = new Date(year, month - 1, day, 23, 59, 59, 999);
+    if (Number.isNaN(expires.getTime())) throw new Error('Invalid date. Use YYYY-MM-DD or DD.MM.YYYY.');
+    if (expires.getTime() <= Date.now()) throw new Error('Expiry date must be in the future.');
+    return expires;
+  }
+
+  const durationDays = days || 30;
+  return new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+}
+
+function formatDateTime(dateInput) {
+  const date = new Date(dateInput);
+  return date.toLocaleString('en-GB', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function upsertEventBan({ guildId, userId, roleId, expiresAt, reason, addedBy, logChannelId }) {
+  const store = loadEventBanStore();
+  const existing = store.bans.find(b => b.guildId === guildId && b.userId === userId && b.roleId === roleId);
+  const record = {
+    guildId,
+    userId,
+    roleId,
+    expiresAt: expiresAt.toISOString(),
+    reason: reason || '',
+    addedBy,
+    logChannelId: logChannelId || config.eventBanLogChannelId || '',
+    createdAt: new Date().toISOString()
+  };
+  if (existing) Object.assign(existing, record);
+  else store.bans.push(record);
+  saveEventBanStore(store);
+}
+
+function removeEventBanRecord(guildId, userId, roleId) {
+  const store = loadEventBanStore();
+  const before = store.bans.length;
+  store.bans = store.bans.filter(b => !(b.guildId === guildId && b.userId === userId && b.roleId === roleId));
+  saveEventBanStore(store);
+  return before - store.bans.length;
+}
+
+
+async function sendEventBanLog(ban, message) {
+  const logChannelId = ban.logChannelId || config.eventBanLogChannelId;
+  if (!logChannelId) return;
+
+  try {
+    const guild = await client.guilds.fetch(ban.guildId);
+    const channel = await guild.channels.fetch(logChannelId).catch(() => null);
+    if (!channel || !channel.isTextBased()) return;
+    await channel.send(message);
+  } catch (error) {
+    console.error(`Failed to send event ban log for ${ban.userId}:`, error.message);
+  }
+}
+
+async function checkExpiredEventBans() {
+  const store = loadEventBanStore();
+  const now = Date.now();
+  const remaining = [];
+  let changed = false;
+
+  for (const ban of store.bans) {
+    if (new Date(ban.expiresAt).getTime() > now) {
+      remaining.push(ban);
+      continue;
+    }
+
+    changed = true;
+    try {
+      const guild = await client.guilds.fetch(ban.guildId);
+      const member = await guild.members.fetch(ban.userId).catch(() => null);
+      if (member && member.roles.cache.has(ban.roleId)) {
+        await member.roles.remove(ban.roleId, 'Event ban expired');
+        console.log(`Removed expired event ban role ${ban.roleId} from ${ban.userId}`);
+        const reasonText = ban.reason ? ` Reason: ${ban.reason}.` : '';
+        await sendEventBanLog(ban, `✅ Event ban expired and was removed from <@${ban.userId}>. Role: <@&${ban.roleId}>.${reasonText}`);
+      }
+    } catch (error) {
+      console.error(`Failed to remove expired event ban for ${ban.userId}:`, error.message);
+      remaining.push(ban);
+      changed = false;
+    }
+  }
+
+  if (changed) saveEventBanStore({ bans: remaining });
 }
 
 function normalize(value) {
@@ -572,8 +737,137 @@ async function handleVoiceDeleteAll(interaction) {
   await sendLongReply(interaction, lines.join('\n'));
 }
 
+
+async function addEventBanToUser(interaction, user, role, expiresAt, reason, logChannelId) {
+  const member = await interaction.guild.members.fetch(user.id);
+  if (member.roles.cache.has(role.id)) {
+    upsertEventBan({
+      guildId: interaction.guild.id,
+      userId: user.id,
+      roleId: role.id,
+      expiresAt,
+      reason,
+      addedBy: interaction.user.id,
+      logChannelId
+    });
+    return 'already';
+  }
+
+  await member.roles.add(role, reason || 'Event ban added by GT Role Bot');
+  upsertEventBan({
+    guildId: interaction.guild.id,
+    userId: user.id,
+    roleId: role.id,
+    expiresAt,
+    reason,
+    addedBy: interaction.user.id,
+    logChannelId
+  });
+  return 'added';
+}
+
+async function handleEventBanAdd(interaction) {
+  const user = interaction.options.getUser('user');
+  const role = interaction.options.getRole('role');
+  const untilDate = interaction.options.getString('until_date');
+  const days = interaction.options.getInteger('days');
+  const reason = interaction.options.getString('reason') || '';
+  const logChannel = interaction.options.getChannel('log_channel');
+  const logChannelId = logChannel?.id || config.eventBanLogChannelId || '';
+  const expiresAt = parseExpiry(untilDate, days);
+
+  const status = await addEventBanToUser(interaction, user, role, expiresAt, reason, logChannelId);
+  const statusText = status === 'already' ? 'already had the role, expiry updated' : 'role added';
+  await safeEdit(interaction, `Event ban set for <@${user.id}>. ${statusText}. Role: ${role}. Expires: ${formatDateTime(expiresAt)}.${logChannelId ? ` Expiry log: <#${logChannelId}>.` : ''}`);
+}
+
+async function handleEventBanFromChannel(interaction) {
+  const channel = interaction.options.getChannel('channel');
+  const role = interaction.options.getRole('role');
+  const untilDate = interaction.options.getString('until_date');
+  const days = interaction.options.getInteger('days');
+  const limit = interaction.options.getInteger('limit') || 1000;
+  const reason = interaction.options.getString('reason') || '';
+  const logChannel = interaction.options.getChannel('log_channel');
+  const logChannelId = logChannel?.id || config.eventBanLogChannelId || '';
+
+  if (!isUsableTextChannel(channel)) return safeEdit(interaction, 'Error: Please select a valid text channel.');
+  const expiresAt = parseExpiry(untilDate, days);
+  const messages = await fetchMessages(channel, limit);
+  const userIds = new Set();
+  for (const message of messages) {
+    if (message.author?.bot) continue;
+    for (const user of message.mentions.users.values()) userIds.add(user.id);
+  }
+
+  let added = 0, updated = 0, failed = 0;
+  const failedUsers = [];
+  for (const userId of userIds) {
+    try {
+      const user = await client.users.fetch(userId);
+      const status = await addEventBanToUser(interaction, user, role, expiresAt, reason, logChannelId);
+      if (status === 'already') updated++;
+      else added++;
+    } catch (error) {
+      failed++;
+      failedUsers.push(`<@${userId}> (${error.message})`);
+    }
+  }
+
+  const lines = [];
+  lines.push('**Event Ban From Channel**');
+  lines.push(`Checked mentions in ${channel}.`);
+  lines.push(`Role: ${role}`);
+  lines.push(`Expires: ${formatDateTime(expiresAt)}`);
+  if (logChannelId) lines.push(`Expiry log channel: <#${logChannelId}>`);
+  lines.push(`Added: ${added}. Updated existing: ${updated}. Failed: ${failed}. Users found: ${userIds.size}.`);
+  if (failedUsers.length) lines.push('', '**Failed:**', ...failedUsers.map(x => `❌ ${x}`));
+  await sendLongReply(interaction, lines.join('\n'));
+}
+
+async function handleEventBanRemove(interaction) {
+  const user = interaction.options.getUser('user');
+  const role = interaction.options.getRole('role');
+  let removedRole = false;
+
+  try {
+    const member = await interaction.guild.members.fetch(user.id);
+    if (member.roles.cache.has(role.id)) {
+      await member.roles.remove(role, 'Event ban manually removed by GT Role Bot');
+      removedRole = true;
+    }
+  } catch (error) {
+    return safeEdit(interaction, `Error removing role: ${error.message}`);
+  }
+
+  const removedRecords = removeEventBanRecord(interaction.guild.id, user.id, role.id);
+  await safeEdit(interaction, `Event ban removed for <@${user.id}>. Role removed: ${removedRole ? 'yes' : 'already not on user'}. Saved expiry cleared: ${removedRecords ? 'yes' : 'none found'}.`);
+}
+
+async function handleEventBanList(interaction) {
+  const role = interaction.options.getRole('role');
+  const store = loadEventBanStore();
+  const bans = store.bans
+    .filter(b => b.guildId === interaction.guild.id)
+    .filter(b => !role || b.roleId === role.id)
+    .sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));
+
+  if (!bans.length) return safeEdit(interaction, 'No active saved event bans found.');
+
+  const lines = [];
+  lines.push('**Active Event Bans**');
+  for (const ban of bans.slice(0, 100)) {
+    const reasonText = ban.reason ? ` — ${ban.reason}` : '';
+    lines.push(`• <@${ban.userId}> | <@&${ban.roleId}> | expires ${formatDateTime(ban.expiresAt)}${reasonText}`);
+  }
+  if (bans.length > 100) lines.push(`...and ${bans.length - 100} more.`);
+  await sendLongReply(interaction, lines.join('\n'));
+}
+
 client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
+  checkExpiredEventBans();
+  setInterval(checkExpiredEventBans, 60 * 1000);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -591,6 +885,10 @@ client.on('interactionCreate', async interaction => {
       case 'voicechannelcreate': return handleVoiceCreate(interaction);
       case 'voicechanneldelete': return handleVoiceDelete(interaction);
       case 'voicechanneldeleteall': return handleVoiceDeleteAll(interaction);
+      case 'eventbanadd': return handleEventBanAdd(interaction);
+      case 'eventbanfromchannel': return handleEventBanFromChannel(interaction);
+      case 'eventbanremove': return handleEventBanRemove(interaction);
+      case 'eventbanlist': return handleEventBanList(interaction);
       default: return safeEdit(interaction, 'Unknown command.');
     }
   } catch (error) {
