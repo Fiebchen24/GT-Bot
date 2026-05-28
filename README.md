@@ -52,7 +52,7 @@ npm start
 After deploy the logs should show:
 
 ```txt
-GT ROLE BOT V6 LOADED
+GT ROLE BOT V6.1 LOADED
 ```
 
 
@@ -72,8 +72,8 @@ Use `/postcupcheck` for the post-cup Twitch proof check. It only asks for `twitc
 `/checksignup` now also counts Discord screenshare entries in the Twitch channel. Supported examples:
 
 ```txt
-@Player DC ss
-PlayerName DC ss
+@Player DC or DC ss
+PlayerName DC or DC ss
 PlayerName discord screenshare
 ```
 
@@ -111,6 +111,20 @@ Examples:
 @Player3 @Player4
 ```
 
-For duos, trios, or squads, only one player in the same sign-in line needs a Twitch link or `DC ss` in the Twitch channel.
+For duos, trios, or squads, only one player in the same sign-in line needs a Twitch link or `DC or DC ss` in the Twitch channel.
 
 The result lists only missing teams, not players who passed.
+
+
+## V6.1 update
+
+For team signups, one sign-in line counts as one team. This works for duos, trios and squads. Only one player from that line/team needs proof in the Twitch/proof channel.
+
+Discord screenshare proof now supports both formats:
+
+```txt
+@Player DC
+@Player DC ss
+PlayerName DC
+PlayerName DC ss
+```

@@ -180,11 +180,11 @@ function extractTwitchLinks(content) {
 }
 
 function hasDiscordScreenshare(content) {
-  return /\b(?:dc|discord)\s*(?:ss|screen\s*share|screenshare)\b/i.test(String(content || ''));
+  return /\b(?:dc(?:\s*ss)?|discord\s*(?:ss|screen\s*share|screenshare))\b/i.test(String(content || ''));
 }
 
 function getDiscordScreenshareLabel(content) {
-  return cleanRegistrationLabel(String(content || '').replace(/\b(?:dc|discord)\s*(?:ss|screen\s*share|screenshare)\b/ig, '')) || 'Discord screenshare';
+  return cleanRegistrationLabel(String(content || '').replace(/\b(?:dc(?:\s*ss)?|discord\s*(?:ss|screen\s*share|screenshare))\b/ig, '')) || 'Discord screenshare';
 }
 
 function validateTextChannel(channel, label = 'channel') {
@@ -544,7 +544,9 @@ async function buildSignupData(guild, signinChannel, twitchChannel, limit) {
 
     // Discord screenshare is allowed instead of a Twitch link.
     // Examples supported in the Twitch channel:
+    // @Player DC
     // @Player DC ss
+    // PlayerName DC
     // PlayerName DC ss
     // PlayerName discord screenshare
     if (hasDcSs) {
@@ -624,7 +626,7 @@ async function sendChannelNotice(channel, content) {
 
 client.once('clientReady', () => {
   console.log('==============================');
-  console.log('GT ROLE BOT V6 LOADED');
+  console.log('GT ROLE BOT V6.1 LOADED');
   console.log(`Logged in as ${client.user.tag}`);
   console.log('If you still see line numbers from older versions, another Render service is still running.');
   console.log('==============================');
@@ -831,7 +833,7 @@ User limit: ${userLimit === 0 ? 'No limit' : userLimit}`);
         lines.push(...looseDcScreenshares.map(label => `⚠️ ${label} → DC SS`));
       }
 
-      lines.push('', '**Matching rule:** One sign-in line = one team. If several players are in one line, only one player from that team needs a Twitch link or `DC ss`. Twitch proof is matched by the name after `twitch.tv/name`.');
+      lines.push('', '**Matching rule:** One sign-in line = one team. If several players are in one line, only one player from that team needs a Twitch link or `DC` / `DC ss`. Twitch proof is matched by the name after `twitch.tv/name`.');
       return replyLong(interaction, '', lines, false);
     }
 
@@ -889,7 +891,7 @@ User limit: ${userLimit === 0 ? 'No limit' : userLimit}`);
       lines.push('', '**Twitch user not found:**');
       lines.push(...(notFound.length ? notFound.map(item => `⚠️ ${item.label} → twitch.tv/${item.twitch}`) : ['✅ None']));
 
-      lines.push('', '**Matching rule:** Twitch proof is matched by the name after `twitch.tv/name`. `DC ss` / `Discord screenshare` counts as manual proof.');
+      lines.push('', '**Matching rule:** Twitch proof is matched by the name after `twitch.tv/name`. `DC` / `DC` / `DC ss` / `Discord screenshare` counts as manual proof.');
       return replyLong(interaction, '', lines, false);
     }
   } catch (error) {
