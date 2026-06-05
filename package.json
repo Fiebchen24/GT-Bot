@@ -1,7 +1,7 @@
 {
   "name": "gt-role-bot",
-  "version": "7.0.0",
-  "description": "GT Role Bot v7.0 with role tools, signup checks, event bans, voice tools and GT competitive calendar.",
+  "version": "7.1.0",
+  "description": "GT Role Bot v7.1 with automatic Fortnite event calendar, manual GT events, role tools, signup checks, event bans and voice tools.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

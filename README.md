@@ -1,39 +1,102 @@
-# GT Role Bot V6.4
+# GT Role Bot v7.1
 
-Render-ready Discord bot.
+Render-ready Discord bot for GT with role tools, signup checks, Twitch/DC proof checks, voice channel tools, event bans and an automatic Fortnite calendar.
 
 ## Deploy
 
 1. Upload all files except `.env` to GitHub.
-2. In Render Background Worker, set environment variables:
-   - TOKEN
-   - CLIENT_ID
-   - GUILD_ID
-   - TWITCH_CLIENT_ID
-   - TWITCH_CLIENT_SECRET
+2. In Render, set the environment variables from `.env.example`.
 3. Build command: `npm install`
 4. Start command: `npm start`
-5. Use **Clear build cache & deploy**.
+5. Use **Clear build cache & deploy** after updating from an older version.
 
-The Render log must show:
+The Render log should show:
 
 ```txt
-GT ROLE BOT V6.4 LOADED
+GT ROLE BOT V7.1 LOADED
+Slash commands registered.
+Logged in as ...
 ```
 
-## Commands
+## Required environment variables
 
-- `/checksignup` pre-cup sign-in team check. One sign-in message = one team. One proof per team is enough.
-- `/postcupcheck` post-cup Twitch live/VOD check.
-- `/voicechannelcreate` create multiple voice channels in a category.
-- `/voicechanneldelete` delete a selected voice channel.
+```env
+TOKEN=your_discord_bot_token
+CLIENT_ID=your_discord_application_id
+GUILD_ID=your_discord_server_id
+```
+
+## Optional Twitch proof variables
+
+Required only for `/postcupcheck` Twitch live/VOD checks:
+
+```env
+TWITCH_CLIENT_ID=your_twitch_client_id
+TWITCH_CLIENT_SECRET=your_twitch_client_secret
+```
+
+## Calendar variables
+
+```env
+CALENDAR_CHANNEL_ID=your_fortnite_calendar_channel_id
+TOURNAMENT_ALERT_ROLE_ID=your_tournament_alert_role_id
+```
+
+## Automatic Fortnite events
+
+v7.1 can fetch Fortnite events automatically from an external Fortnite/Cito events endpoint.
+
+```env
+CITO_API_URL=your_events_api_url
+CITO_API_KEY=your_api_key_if_required
+```
+
+Alternative names also work:
+
+```env
+FORTNITE_EVENTS_API_URL=your_events_api_url
+FORTNITE_EVENTS_API_KEY=your_api_key_if_required
+```
+
+If no API URL is set, the bot still works, but only manual GT events from `data/gtCalendar.json` are shown.
+
+The automatic fetcher is intentionally flexible: it accepts most JSON event-list formats and tries to normalize common fields like `name`, `title`, `startTime`, `endTime`, `windows`, `region`, and `platform`.
+
+## Calendar commands
+
+- `/calendar` — shows the current calendar embed.
+- `/calendarpost` — posts or updates the calendar embed in `CALENDAR_CHANNEL_ID`.
+- `/calendarrefresh` — fetches Fortnite events immediately and updates the calendar.
+- `/calendaradd` — adds a manual GT event.
+- `/calendarremove` — removes a manual GT event by ID.
+- `/calendarlist` — lists manual GT events with IDs.
+
+The calendar message updates automatically when the bot starts and every 6 hours.
+
+## Calendar files
+
+- `data/gtCalendar.json` — manual GT events.
+- `data/fortniteEventsCache.json` — automatic Fortnite event cache.
+- `data/gtCalendarMessage.json` — saved Discord calendar message ID.
+
+## Main commands
+
 - `/giverolefromchannel`
 - `/takerolefromchannel`
 - `/earningsroles`
+- `/checksignup`
+- `/postcupcheck`
+- `/voicechannelcreate`
+- `/voicechanneldelete`
+- `/voicechanneldeleteall`
+- `/eventbanadd`
+- `/eventbanfromchannel`
+- `/eventbanremove`
+- `/eventbanlist`
 
-## DC proof
+## DC proof examples
 
-These count as proof:
+These count as manual proof:
 
 ```txt
 @Player DC
@@ -42,45 +105,6 @@ PlayerName DC
 PlayerName DC ss
 ```
 
-
-## V6.8
-- Added `/voicechanneldeleteall` to delete all voice channels in a selected category.
-- Optional `name_prefix` lets you delete only channels starting with a specific base name.
-
-
 ## Event bans
 
-Commands:
-
-- `/eventbanadd user role until_date days reason` — gives one user an event-ban role. Use either `until_date` (`YYYY-MM-DD` or `DD.MM.YYYY`) or `days`. If both are empty, it defaults to 30 days.
-- `/eventbanfromchannel channel role until_date days limit reason` — gives the event-ban role to everyone mentioned in a channel.
-- `/eventbanremove user role` — removes the event-ban role and deletes the saved expiry.
-- `/eventbanlist role` — shows saved active event bans.
-
-The bot checks expired bans every minute and removes the role automatically.
-
-
-## V6.8 Event Ban Expiry Logs
-
-Event bans are automatically checked every minute. When a ban expires, the bot removes the role automatically. You can set a log channel per command with `log_channel`, or set `eventBanLogChannelId` in `config.json` as the default log channel.
-
-
-## GT Role Bot v7.0 - Calendar System
-
-New commands:
-
-- `/calendar` - Shows the current GT competitive calendar.
-- `/calendaradd` - Adds a Fortnite Cup, GT Event, Partner Event, Scrims or Other event.
-- `/calendarremove` - Removes an event by ID.
-- `/calendarlist` - Lists saved events with IDs.
-- `/calendarpost` - Posts or updates the calendar embed in the configured calendar channel.
-
-Required env values:
-
-```env
-CALENDAR_CHANNEL_ID=your_fortnite_calendar_channel_id
-TOURNAMENT_ALERT_ROLE_ID=your_tournament_alert_role_id
-```
-
-The bot updates the calendar message automatically when it starts and every 6 hours.
-Times are shown as CET/CEST for GT.
+Event bans are checked every minute. When a ban expires, the bot removes the role automatically and can post into the configured log channel.

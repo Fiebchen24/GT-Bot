@@ -27,5 +27,9 @@
   ],
   "eventBanLogChannelId": "",
   "calendarChannelId": "",
-  "tournamentAlertRoleId": ""
+  "tournamentAlertRoleId": "",
+  "citoApiUrl": "",
+  "citoApiKey": "",
+  "fortniteEventsApiUrl": "",
+  "fortniteEventsApiKey": ""
 }
