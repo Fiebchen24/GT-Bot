@@ -11,12 +11,13 @@ const {
   Routes,
   PermissionFlagsBits,
   ChannelType,
-  MessageFlags
+  MessageFlags,
+  EmbedBuilder
 } = require('discord.js');
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V6.8 LOADED');
+console.log('GT ROLE BOT V7.0 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -130,7 +131,45 @@ const commands = [
     .setName('eventbanlist')
     .setDescription('List active saved event bans.')
     .addRoleOption(o => o.setName('role').setDescription('Optional: only list this event-ban role'))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
+    .setName('calendar')
+    .setDescription('Show the current GT competitive calendar.'),
+
+  new SlashCommandBuilder()
+    .setName('calendarlist')
+    .setDescription('List saved GT calendar events.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName('calendarpost')
+    .setDescription('Post or update the GT calendar embed in the configured channel.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName('calendaradd')
+    .setDescription('Add an event to the GT competitive calendar.')
+    .addStringOption(o => o.setName('title').setDescription('Event title').setRequired(true))
+    .addStringOption(o => o.setName('date').setDescription('Date: YYYY-MM-DD').setRequired(true))
+    .addStringOption(o => o.setName('time').setDescription('Time: HH:MM in CET/CEST').setRequired(true))
+    .addStringOption(o => o.setName('type').setDescription('Type, e.g. Fortnite Cup or GT Event').setRequired(true)
+      .addChoices(
+        { name: 'Fortnite Cup', value: 'Fortnite Cup' },
+        { name: 'GT Event', value: 'GT Event' },
+        { name: 'Partner Event', value: 'Partner Event' },
+        { name: 'Scrims', value: 'Scrims' },
+        { name: 'Other', value: 'Other' }
+      ))
+    .addStringOption(o => o.setName('region').setDescription('Region, e.g. EU / NAC / NAW / OCE').setRequired(false))
+    .addStringOption(o => o.setName('notes').setDescription('Optional short notes').setRequired(false))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName('calendarremove')
+    .setDescription('Remove an event from the GT competitive calendar by ID.')
+    .addStringOption(o => o.setName('id').setDescription('Event ID from /calendarlist').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -864,10 +903,214 @@ async function handleEventBanList(interaction) {
   await sendLongReply(interaction, lines.join('\n'));
 }
 
-client.once('clientReady', () => {
+
+const CALENDAR_FILE = path.join(__dirname, 'data', 'gtCalendar.json');
+const CALENDAR_MESSAGE_FILE = path.join(__dirname, 'data', 'gtCalendarMessage.json');
+
+function ensureDataFolder() {
+  const dataDir = path.join(__dirname, 'data');
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+}
+
+function loadCalendarStore() {
+  ensureDataFolder();
+  try {
+    if (!fs.existsSync(CALENDAR_FILE)) return { events: [] };
+    const parsed = JSON.parse(fs.readFileSync(CALENDAR_FILE, 'utf8'));
+    if (Array.isArray(parsed)) return { events: parsed };
+    return { events: Array.isArray(parsed.events) ? parsed.events : [] };
+  } catch (error) {
+    console.error('Could not load gtCalendar.json:', error);
+    return { events: [] };
+  }
+}
+
+function saveCalendarStore(store) {
+  ensureDataFolder();
+  fs.writeFileSync(CALENDAR_FILE, JSON.stringify({ events: store.events || [] }, null, 2));
+}
+
+function loadCalendarMessageStore() {
+  ensureDataFolder();
+  try {
+    if (!fs.existsSync(CALENDAR_MESSAGE_FILE)) return {};
+    return JSON.parse(fs.readFileSync(CALENDAR_MESSAGE_FILE, 'utf8')) || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveCalendarMessageStore(store) {
+  ensureDataFolder();
+  fs.writeFileSync(CALENDAR_MESSAGE_FILE, JSON.stringify(store || {}, null, 2));
+}
+
+function berlinDateString(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const get = type => parts.find(p => p.type === type)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+function validateCalendarDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Invalid date. Use YYYY-MM-DD.');
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) throw new Error('Invalid date. Use YYYY-MM-DD.');
+}
+
+function validateCalendarTime(time) {
+  if (!/^\d{2}:\d{2}$/.test(time)) throw new Error('Invalid time. Use HH:MM.');
+  const [h, m] = time.split(':').map(Number);
+  if (h < 0 || h > 23 || m < 0 || m > 59) throw new Error('Invalid time. Use HH:MM.');
+}
+
+function makeCalendarId() {
+  return `gt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function sortedCalendarEvents(includePast = false) {
+  const today = berlinDateString();
+  return loadCalendarStore().events
+    .filter(e => includePast || e.date >= today)
+    .sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`));
+}
+
+function formatCalendarLine(e, withId = false) {
+  const region = e.region ? ` \`${e.region}\`` : '';
+  const notes = e.notes ? ` — ${e.notes}` : '';
+  const id = withId ? `\n  ID: \`${e.id}\`` : '';
+  return `• **${e.date} ${e.time}** — ${e.title}${region}\n  ${e.type}${notes}${id}`;
+}
+
+function buildCalendarEmbed() {
+  const today = berlinDateString();
+  const events = sortedCalendarEvents(false);
+  const todayEvents = events.filter(e => e.date === today);
+  const upcomingEvents = events.filter(e => e.date > today).slice(0, 10);
+
+  return new EmbedBuilder()
+    .setTitle('📅 Today at GT')
+    .setDescription('Current Fortnite cups, GT events and competitive reminders. Times are CET/CEST.')
+    .addFields(
+      {
+        name: 'Today',
+        value: todayEvents.length ? todayEvents.map(e => formatCalendarLine(e)).join('\n') : 'No events listed for today.'
+      },
+      {
+        name: 'Upcoming',
+        value: upcomingEvents.length ? upcomingEvents.map(e => formatCalendarLine(e)).join('\n') : 'No upcoming events listed.'
+      }
+    )
+    .setFooter({ text: 'GT Competitive Calendar • Updated automatically' })
+    .setTimestamp();
+}
+
+async function getCalendarChannel(guild) {
+  const channelId = process.env.CALENDAR_CHANNEL_ID || config.calendarChannelId;
+  if (!channelId) return null;
+  return guild.channels.fetch(channelId).catch(() => null);
+}
+
+async function updateCalendarMessage(guild, ping = false) {
+  const channel = await getCalendarChannel(guild);
+  if (!channel || !channel.isTextBased()) return null;
+
+  const embed = buildCalendarEmbed();
+  const store = loadCalendarMessageStore();
+  let message = null;
+
+  if (store[guild.id]?.messageId) {
+    message = await channel.messages.fetch(store[guild.id].messageId).catch(() => null);
+  }
+
+  if (message) {
+    await message.edit({ embeds: [embed] });
+    return message;
+  }
+
+  const roleId = process.env.TOURNAMENT_ALERT_ROLE_ID || config.tournamentAlertRoleId;
+  const content = ping && roleId ? `<@&${roleId}>` : '';
+  message = await channel.send({ content, embeds: [embed], allowedMentions: { roles: roleId ? [roleId] : [] } });
+  store[guild.id] = { channelId: channel.id, messageId: message.id, updatedAt: new Date().toISOString() };
+  saveCalendarMessageStore(store);
+  return message;
+}
+
+async function handleCalendar(interaction) {
+  await interaction.editReply({ embeds: [buildCalendarEmbed()] });
+}
+
+async function handleCalendarList(interaction) {
+  const events = sortedCalendarEvents(true).slice(0, 50);
+  if (!events.length) return safeEdit(interaction, 'No calendar events saved.');
+  const lines = ['**GT Calendar Events**', ...events.map(e => formatCalendarLine(e, true))];
+  await sendLongReply(interaction, lines.join('\n'));
+}
+
+async function handleCalendarAdd(interaction) {
+  const title = interaction.options.getString('title').trim();
+  const date = interaction.options.getString('date').trim();
+  const time = interaction.options.getString('time').trim();
+  const type = interaction.options.getString('type').trim();
+  const region = (interaction.options.getString('region') || 'EU').trim();
+  const notes = (interaction.options.getString('notes') || '').trim();
+
+  validateCalendarDate(date);
+  validateCalendarTime(time);
+  if (!title) throw new Error('Title cannot be empty.');
+
+  const store = loadCalendarStore();
+  const event = {
+    id: makeCalendarId(),
+    title,
+    date,
+    time,
+    region,
+    type,
+    notes,
+    createdBy: interaction.user.id,
+    createdAt: new Date().toISOString()
+  };
+  store.events.push(event);
+  saveCalendarStore(store);
+
+  await updateCalendarMessage(interaction.guild, false).catch(error => console.error('Calendar auto-update failed:', error.message));
+  await safeEdit(interaction, `Calendar event added: **${title}** on **${date} ${time}**. ID: \`${event.id}\``);
+}
+
+async function handleCalendarRemove(interaction) {
+  const id = interaction.options.getString('id').trim();
+  const store = loadCalendarStore();
+  const before = store.events.length;
+  const removed = store.events.find(e => e.id === id);
+  store.events = store.events.filter(e => e.id !== id);
+  saveCalendarStore(store);
+
+  if (before === store.events.length) return safeEdit(interaction, `No calendar event found with ID \`${id}\`.`);
+  await updateCalendarMessage(interaction.guild, false).catch(error => console.error('Calendar auto-update failed:', error.message));
+  await safeEdit(interaction, `Calendar event removed: **${removed.title}**.`);
+}
+
+async function handleCalendarPost(interaction) {
+  const message = await updateCalendarMessage(interaction.guild, false);
+  if (!message) return safeEdit(interaction, 'Calendar channel not found. Set CALENDAR_CHANNEL_ID in .env or calendarChannelId in config.json.');
+  await safeEdit(interaction, `Calendar posted/updated in ${message.channel}.`);
+}
+
+async function updateCalendarForAllGuilds() {
+  for (const guild of client.guilds.cache.values()) {
+    await updateCalendarMessage(guild, false).catch(error => console.error(`Calendar update failed for ${guild.id}:`, error.message));
+  }
+}
+
+client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}`);
   checkExpiredEventBans();
   setInterval(checkExpiredEventBans, 60 * 1000);
+  await updateCalendarForAllGuilds();
+  setInterval(updateCalendarForAllGuilds, 6 * 60 * 60 * 1000);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -889,6 +1132,11 @@ client.on('interactionCreate', async interaction => {
       case 'eventbanfromchannel': return handleEventBanFromChannel(interaction);
       case 'eventbanremove': return handleEventBanRemove(interaction);
       case 'eventbanlist': return handleEventBanList(interaction);
+      case 'calendar': return handleCalendar(interaction);
+      case 'calendarlist': return handleCalendarList(interaction);
+      case 'calendaradd': return handleCalendarAdd(interaction);
+      case 'calendarremove': return handleCalendarRemove(interaction);
+      case 'calendarpost': return handleCalendarPost(interaction);
       default: return safeEdit(interaction, 'Unknown command.');
     }
   } catch (error) {

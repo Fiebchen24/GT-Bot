@@ -63,3 +63,24 @@ The bot checks expired bans every minute and removes the role automatically.
 ## V6.8 Event Ban Expiry Logs
 
 Event bans are automatically checked every minute. When a ban expires, the bot removes the role automatically. You can set a log channel per command with `log_channel`, or set `eventBanLogChannelId` in `config.json` as the default log channel.
+
+
+## GT Role Bot v7.0 - Calendar System
+
+New commands:
+
+- `/calendar` - Shows the current GT competitive calendar.
+- `/calendaradd` - Adds a Fortnite Cup, GT Event, Partner Event, Scrims or Other event.
+- `/calendarremove` - Removes an event by ID.
+- `/calendarlist` - Lists saved events with IDs.
+- `/calendarpost` - Posts or updates the calendar embed in the configured calendar channel.
+
+Required env values:
+
+```env
+CALENDAR_CHANNEL_ID=your_fortnite_calendar_channel_id
+TOURNAMENT_ALERT_ROLE_ID=your_tournament_alert_role_id
+```
+
+The bot updates the calendar message automatically when it starts and every 6 hours.
+Times are shown as CET/CEST for GT.

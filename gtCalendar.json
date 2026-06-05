@@ -1,0 +1,15 @@
+{
+  "events": [
+    {
+      "id": "gt-example-001",
+      "title": "GT Scrims",
+      "date": "2026-06-06",
+      "time": "20:00",
+      "region": "EU",
+      "type": "GT Event",
+      "notes": "Example event \u2014 edit or remove with /calendarremove",
+      "createdBy": "system",
+      "createdAt": "2026-06-05T00:00:00.000Z"
+    }
+  ]
+}

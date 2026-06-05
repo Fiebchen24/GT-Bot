@@ -1,13 +1,31 @@
 {
-  "eventBanRoleId": "1509532926440771685",
-  "eventBanLogChannelId": "1503474859500376236",
-
   "earningsRoles": [
-    { "min": 5000, "roleId": "ROLE_ID_5000_10000" },
-    { "min": 10001, "roleId": "ROLE_ID_10001_20000" },
-    { "min": 20001, "roleId": "ROLE_ID_20001_30000" },
-    { "min": 30001, "roleId": "ROLE_ID_30001_40000" },
-    { "min": 40001, "roleId": "ROLE_ID_40001_50000" },
-    { "min": 50001, "roleId": "ROLE_ID_AB_50001" }
-  ]
+    {
+      "min": 5000,
+      "roleId": "ROLE_ID_5000_10000"
+    },
+    {
+      "min": 10001,
+      "roleId": "ROLE_ID_10001_20000"
+    },
+    {
+      "min": 20001,
+      "roleId": "ROLE_ID_20001_30000"
+    },
+    {
+      "min": 30001,
+      "roleId": "ROLE_ID_30001_40000"
+    },
+    {
+      "min": 40001,
+      "roleId": "ROLE_ID_40001_50000"
+    },
+    {
+      "min": 50001,
+      "roleId": "ROLE_ID_AB_50001"
+    }
+  ],
+  "eventBanLogChannelId": "",
+  "calendarChannelId": "",
+  "tournamentAlertRoleId": ""
 }
