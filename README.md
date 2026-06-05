@@ -108,3 +108,15 @@ PlayerName DC ss
 ## Event bans
 
 Event bans are checked every minute. When a ban expires, the bot removes the role automatically and can post into the configured log channel.
+
+
+## v7.1.1 Cito setup
+
+Set these Render environment variables:
+
+```env
+CITO_API_KEY=your_cito_key
+CITO_API_URL=https://api.citoapi.com/api/v1/fortnite/tournaments/upcoming
+```
+
+The bot uses the free upcoming tournaments endpoint and sends the key with the `x-api-key` header.

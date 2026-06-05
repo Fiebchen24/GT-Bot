@@ -17,7 +17,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V7.0 LOADED');
+console.log('GT ROLE BOT V7.1.1 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -1116,27 +1116,50 @@ function extractFortniteEventsFromPayload(payload) {
     .slice(0, 100);
 }
 
+function buildCitoUpcomingUrl(rawUrl) {
+  const fallback = 'https://api.citoapi.com/api/v1/fortnite/tournaments/upcoming';
+  if (!rawUrl) return fallback;
+
+  const trimmed = String(rawUrl).trim().replace(/\/+$/, '');
+  if (!trimmed) return fallback;
+
+  // If a full tournaments endpoint is supplied, use it as-is.
+  if (/\/fortnite\/tournaments(\/upcoming)?$/i.test(trimmed)) return trimmed;
+
+  // If the user supplied the base API URL, append the free upcoming endpoint.
+  return `${trimmed}/fortnite/tournaments/upcoming`;
+}
+
 async function fetchFortniteEvents() {
-  const apiUrl = process.env.CITO_API_URL || process.env.FORTNITE_EVENTS_API_URL || config.citoApiUrl || config.fortniteEventsApiUrl;
+  const rawApiUrl = process.env.CITO_API_URL || process.env.FORTNITE_EVENTS_API_URL || config.citoApiUrl || config.fortniteEventsApiUrl;
+  const apiUrl = buildCitoUpcomingUrl(rawApiUrl);
   const apiKey = process.env.CITO_API_KEY || process.env.FORTNITE_EVENTS_API_KEY || config.citoApiKey || config.fortniteEventsApiKey;
 
-  if (!apiUrl) {
-    console.log('Calendar auto-fetch skipped: set CITO_API_URL or FORTNITE_EVENTS_API_URL to enable automatic Fortnite events.');
+  if (!apiKey) {
+    console.log('Calendar auto-fetch skipped: set CITO_API_KEY to enable automatic Fortnite events.');
     return loadFortniteEventsCache().events;
   }
 
-  const headers = { Accept: 'application/json' };
-  if (apiKey) {
-    headers.Authorization = `Bearer ${apiKey}`;
-    headers['x-api-key'] = apiKey;
-  }
+  const headers = {
+    Accept: 'application/json',
+    'x-api-key': apiKey
+  };
 
   const response = await fetch(apiUrl, { headers });
-  if (!response.ok) throw new Error(`Fortnite events API error ${response.status}: ${response.statusText}`);
+
+  if (!response.ok) {
+    let details = '';
+    try {
+      const body = await response.text();
+      details = body ? ` - ${body.slice(0, 300)}` : '';
+    } catch (_) {}
+    throw new Error(`Fortnite events API error ${response.status}: ${response.statusText}${details}`);
+  }
+
   const payload = await response.json();
   const events = extractFortniteEventsFromPayload(payload);
   saveFortniteEventsCache(events, apiUrl);
-  console.log(`Fetched ${events.length} Fortnite events.`);
+  console.log(`Fetched ${events.length} Fortnite events from Cito upcoming endpoint.`);
   return events;
 }
 
