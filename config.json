@@ -26,10 +26,6 @@
     }
   ],
   "eventBanLogChannelId": "",
-  "fortniteCalendarIcsUrl": "https://fortnitetracker.com/events.ics?",
-  "fortniteCalendarChannelId": "1512404881028284578",
-  "fortniteCalendarTimeZone": "Europe/Berlin",
-  "fortniteCalendarAutoPost": true,
-  "fortniteCalendarAutoPostHour": 9,
-  "fortniteCalendarAutoPostMinute": 0
+  "fortniteCalendarIcsUrl": "",
+  "fortniteCalendarIcsFile": ""
 }

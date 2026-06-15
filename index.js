@@ -16,7 +16,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V7.0 LOADED');
+console.log('GT ROLE BOT V7.1 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -130,25 +130,27 @@ const commands = [
     .setName('eventbanlist')
     .setDescription('List active saved event bans.')
     .addRoleOption(o => o.setName('role').setDescription('Optional: only list this event-ban role'))
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+,
 
   new SlashCommandBuilder()
     .setName('fortniteevents')
     .setDescription('Show upcoming Fortnite events from the ICS calendar.')
-    .addIntegerOption(o => o.setName('days').setDescription('Show events within this many days. Default: 7').setMinValue(1).setMaxValue(60))
-    .addIntegerOption(o => o.setName('max').setDescription('Maximum events to show. Default: 15').setMinValue(1).setMaxValue(30)),
+    .addIntegerOption(o => o.setName('days').setDescription('How many days ahead to show, default 7').setMinValue(1).setMaxValue(60))
+    .addIntegerOption(o => o.setName('limit').setDescription('Max events to show, default 10').setMinValue(1).setMaxValue(25)),
 
   new SlashCommandBuilder()
     .setName('fortniteeventstoday')
     .setDescription("Show today's Fortnite events from the ICS calendar.")
-    .addIntegerOption(o => o.setName('max').setDescription('Maximum events to show. Default: 20').setMinValue(1).setMaxValue(30)),
+    .addIntegerOption(o => o.setName('limit').setDescription('Max events to show, default 15').setMinValue(1).setMaxValue(25)),
 
   new SlashCommandBuilder()
     .setName('fortniteeventspost')
-    .setDescription('Post Fortnite events to the calendar channel or a selected channel.')
-    .addChannelOption(o => o.setName('channel').setDescription('Optional channel to post to. Defaults to config calendar channel.').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
-    .addIntegerOption(o => o.setName('days').setDescription('Post events within this many days. Default: 7').setMinValue(1).setMaxValue(60))
-    .addIntegerOption(o => o.setName('max').setDescription('Maximum events to post. Default: 20').setMinValue(1).setMaxValue(30))
+    .setDescription('Post Fortnite calendar events into a selected channel.')
+    .addChannelOption(o => o.setName('channel').setDescription('Channel to post into').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
+    .addIntegerOption(o => o.setName('days').setDescription('How many days ahead to show, default 7').setMinValue(1).setMaxValue(60))
+    .addIntegerOption(o => o.setName('limit').setDescription('Max events to show, default 10').setMinValue(1).setMaxValue(25))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -784,258 +786,6 @@ async function addEventBanToUser(interaction, user, role, expiresAt, reason, log
   return 'added';
 }
 
-
-function getCalendarConfig() {
-  return {
-    url: config.fortniteCalendarIcsUrl || process.env.FORTNITE_CALENDAR_ICS_URL || '',
-    channelId: config.fortniteCalendarChannelId || process.env.FORTNITE_CALENDAR_CHANNEL_ID || '',
-    timeZone: config.fortniteCalendarTimeZone || 'Europe/Berlin'
-  };
-}
-
-function unfoldIcsLines(text) {
-  return String(text || '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .split('\n')
-    .reduce((lines, line) => {
-      if (/^[ \t]/.test(line) && lines.length) lines[lines.length - 1] += line.slice(1);
-      else lines.push(line);
-      return lines;
-    }, []);
-}
-
-function parseIcsValue(line) {
-  const idx = line.indexOf(':');
-  if (idx === -1) return { key: line, value: '' };
-  const rawKey = line.slice(0, idx);
-  const key = rawKey.split(';')[0].toUpperCase();
-  const value = line.slice(idx + 1)
-    .replace(/\\n/g, '\n')
-    .replace(/\\,/g, ',')
-    .replace(/\\;/g, ';')
-    .replace(/\\\\/g, '\\');
-  return { key, value };
-}
-
-function parseIcsDate(value) {
-  if (!value) return null;
-  let match = String(value).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
-  if (match) {
-    const [, y, mo, d, h, mi, se] = match.map(Number);
-    return new Date(Date.UTC(y, mo - 1, d, h, mi, se));
-  }
-  match = String(value).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
-  if (match) {
-    const [, y, mo, d, h, mi, se] = match.map(Number);
-    return new Date(y, mo - 1, d, h, mi, se);
-  }
-  match = String(value).match(/^(\d{4})(\d{2})(\d{2})$/);
-  if (match) {
-    const [, y, mo, d] = match.map(Number);
-    return new Date(y, mo - 1, d, 0, 0, 0);
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-async function fetchFortniteEvents() {
-  const { url } = getCalendarConfig();
-  if (!url) throw new Error('Missing fortniteCalendarIcsUrl in config.json.');
-
-  const res = await fetch(url, { headers: { 'User-Agent': 'GT-Role-Bot/7.0' } });
-  if (!res.ok) throw new Error(`Could not fetch Fortnite calendar: HTTP ${res.status}`);
-  const ics = await res.text();
-  const lines = unfoldIcsLines(ics);
-  const events = [];
-  let current = null;
-
-  for (const line of lines) {
-    if (line === 'BEGIN:VEVENT') current = {};
-    else if (line === 'END:VEVENT') {
-      if (current?.start && current?.summary) events.push(current);
-      current = null;
-    } else if (current) {
-      const { key, value } = parseIcsValue(line);
-      if (key === 'SUMMARY') current.summary = value;
-      if (key === 'DESCRIPTION') current.description = value;
-      if (key === 'LOCATION') current.location = value;
-      if (key === 'URL') current.url = value;
-      if (key === 'DTSTART') current.start = parseIcsDate(value);
-      if (key === 'DTEND') current.end = parseIcsDate(value);
-    }
-  }
-
-  return events
-    .filter(e => e.start instanceof Date && !Number.isNaN(e.start.getTime()))
-    .sort((a, b) => a.start - b.start);
-}
-
-function isSameCalendarDay(date, target, timeZone) {
-  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
-  return fmt.format(date) === fmt.format(target);
-}
-
-function formatEventTime(event, timeZone) {
-  const dateFmt = new Intl.DateTimeFormat('de-DE', { timeZone, weekday: 'short', day: '2-digit', month: '2-digit' });
-  const timeFmt = new Intl.DateTimeFormat('de-DE', { timeZone, hour: '2-digit', minute: '2-digit' });
-  const startDate = dateFmt.format(event.start);
-  const startTime = timeFmt.format(event.start);
-  const endTime = event.end ? timeFmt.format(event.end) : '';
-  return endTime ? `${startDate}, ${startTime} - ${endTime}` : `${startDate}, ${startTime}`;
-}
-
-function buildFortniteEventsText(title, events, timeZone) {
-  const lines = [`**${title}**`];
-  if (!events.length) {
-    lines.push('No Fortnite events found for this range.');
-    return lines.join('\n');
-  }
-  for (const event of events) {
-    const cleanSummary = String(event.summary || 'Fortnite Event').replace(/\s+/g, ' ').trim();
-    lines.push(`📅 **${cleanSummary}**`);
-    lines.push(`⏰ ${formatEventTime(event, timeZone)}`);
-    if (event.url) lines.push(`🔗 ${event.url}`);
-    lines.push('');
-  }
-  return lines.join('\n').trim();
-}
-
-async function getFortniteEventsInRange(days, max, onlyToday = false) {
-  const { timeZone } = getCalendarConfig();
-  const now = new Date();
-  const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
-  const events = await fetchFortniteEvents();
-  const filtered = events.filter(e => {
-    if (e.end && e.end < now) return false;
-    if (!e.end && e.start < now) return false;
-    if (onlyToday) return isSameCalendarDay(e.start, now, timeZone);
-    return e.start <= until;
-  }).slice(0, max);
-  return { events: filtered, timeZone };
-}
-
-async function handleFortniteEvents(interaction, onlyToday = false) {
-  const days = onlyToday ? 1 : (interaction.options.getInteger('days') || 7);
-  const max = interaction.options.getInteger('max') || (onlyToday ? 20 : 15);
-  const { events, timeZone } = await getFortniteEventsInRange(days, max, onlyToday);
-  const title = onlyToday ? 'Today\'s Fortnite Events' : `Upcoming Fortnite Events - next ${days} days`;
-  await sendLongReply(interaction, buildFortniteEventsText(title, events, timeZone));
-}
-
-async function handleFortniteEventsPost(interaction) {
-  const { channelId } = getCalendarConfig();
-  const chosen = interaction.options.getChannel('channel');
-  const targetChannel = chosen || (channelId ? await interaction.guild.channels.fetch(channelId).catch(() => null) : null);
-  const days = interaction.options.getInteger('days') || 7;
-  const max = interaction.options.getInteger('max') || 20;
-
-  if (!isUsableTextChannel(targetChannel)) {
-    return safeEdit(interaction, 'Error: Please select a valid calendar text channel or set fortniteCalendarChannelId in config.json.');
-  }
-
-  const { events, timeZone } = await getFortniteEventsInRange(days, max, false);
-  const text = buildFortniteEventsText(`Upcoming Fortnite Events - next ${days} days`, events, timeZone);
-  for (const chunk of splitText(text, 1900)) await targetChannel.send(chunk);
-  await safeEdit(interaction, `Posted ${events.length} Fortnite events to ${targetChannel}.`);
-}
-
-
-const CALENDAR_AUTO_POST_FILE = path.join(__dirname, 'calendarAutoPost.json');
-
-function loadCalendarAutoPostStore() {
-  try {
-    if (!fs.existsSync(CALENDAR_AUTO_POST_FILE)) return { lastPostedDate: '' };
-    return JSON.parse(fs.readFileSync(CALENDAR_AUTO_POST_FILE, 'utf8'));
-  } catch {
-    return { lastPostedDate: '' };
-  }
-}
-
-function saveCalendarAutoPostStore(store) {
-  try {
-    fs.writeFileSync(CALENDAR_AUTO_POST_FILE, JSON.stringify(store, null, 2));
-  } catch (error) {
-    console.error('Could not save calendar auto post store:', error);
-  }
-}
-
-function getLocalDateKey(date, timeZone) {
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  });
-  return fmt.format(date);
-}
-
-function getLocalHourMinute(date, timeZone) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }).formatToParts(date);
-  const get = type => Number(parts.find(p => p.type === type)?.value || 0);
-  return { hour: get('hour'), minute: get('minute') };
-}
-
-async function postTodayFortniteEventsToConfiguredChannel(reason = 'auto') {
-  const cal = getCalendarConfig();
-  if (!cal.channelId) {
-    console.log('Fortnite calendar auto post skipped: missing fortniteCalendarChannelId.');
-    return false;
-  }
-
-  const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
-  if (!guild) {
-    console.log('Fortnite calendar auto post skipped: guild not found.');
-    return false;
-  }
-
-  const targetChannel = await guild.channels.fetch(cal.channelId).catch(() => null);
-  if (!isUsableTextChannel(targetChannel)) {
-    console.log('Fortnite calendar auto post skipped: configured calendar channel is not a text channel.');
-    return false;
-  }
-
-  const { events, timeZone } = await getFortniteEventsInRange(1, 30, true);
-  const title = "Today's Fortnite Events";
-  const text = buildFortniteEventsText(title, events, timeZone);
-  for (const chunk of splitText(text, 1900)) await targetChannel.send(chunk);
-  console.log(`Fortnite calendar ${reason} post sent to ${targetChannel.id}: ${events.length} event(s).`);
-  return true;
-}
-
-async function checkFortniteCalendarAutoPost() {
-  const enabled = config.fortniteCalendarAutoPost !== false;
-  if (!enabled) return;
-
-  const cal = getCalendarConfig();
-  const hour = Number.isInteger(config.fortniteCalendarAutoPostHour) ? config.fortniteCalendarAutoPostHour : 9;
-  const minute = Number.isInteger(config.fortniteCalendarAutoPostMinute) ? config.fortniteCalendarAutoPostMinute : 0;
-  const now = new Date();
-  const local = getLocalHourMinute(now, cal.timeZone);
-
-  if (local.hour !== hour || local.minute !== minute) return;
-
-  const todayKey = getLocalDateKey(now, cal.timeZone);
-  const store = loadCalendarAutoPostStore();
-  if (store.lastPostedDate === todayKey) return;
-
-  try {
-    const posted = await postTodayFortniteEventsToConfiguredChannel('daily auto');
-    if (posted) {
-      store.lastPostedDate = todayKey;
-      store.lastPostedAt = new Date().toISOString();
-      saveCalendarAutoPostStore(store);
-    }
-  } catch (error) {
-    console.error('Fortnite calendar auto post failed:', error);
-  }
-}
-
 async function handleEventBanAdd(interaction) {
   const user = interaction.options.getUser('user');
   const role = interaction.options.getRole('role');
@@ -1134,12 +884,206 @@ async function handleEventBanList(interaction) {
   await sendLongReply(interaction, lines.join('\n'));
 }
 
+
+function getFortniteCalendarSource() {
+  const url = process.env.FORTNITE_CALENDAR_ICS_URL || config.fortniteCalendarIcsUrl || config.fortniteCalendarUrl || '';
+  const file = process.env.FORTNITE_CALENDAR_ICS_FILE || config.fortniteCalendarIcsFile || '';
+  return { url: String(url || '').trim(), file: String(file || '').trim() };
+}
+
+async function fetchFortniteCalendarText() {
+  const { url, file } = getFortniteCalendarSource();
+
+  if (file) {
+    const filePath = path.isAbsolute(file) ? file : path.join(__dirname, file);
+    if (!fs.existsSync(filePath)) throw new Error(`Fortnite calendar file not found: ${file}`);
+    return fs.readFileSync(filePath, 'utf8');
+  }
+
+  if (!url) {
+    throw new Error('No Fortnite calendar configured. Add fortniteCalendarIcsUrl to config.json or FORTNITE_CALENDAR_ICS_URL in Render Environment.');
+  }
+
+  const response = await fetch(url, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent': 'Mozilla/5.0 GT-Role-Bot/7.1 (+https://discord.com)',
+      'Accept': 'text/calendar, text/plain, */*',
+      'Cache-Control': 'no-cache'
+    }
+  });
+
+  if (!response.ok) {
+    if (response.status === 403) {
+      throw new Error('Could not fetch Fortnite calendar: HTTP 403. The ICS link is blocked or private. Make the calendar public/exportable, use the direct .ics export link, or upload the .ics file into GitHub and set fortniteCalendarIcsFile.');
+    }
+    throw new Error(`Could not fetch Fortnite calendar: HTTP ${response.status}`);
+  }
+
+  const text = await response.text();
+  if (!text.includes('BEGIN:VCALENDAR')) throw new Error('The calendar response is not a valid ICS calendar.');
+  return text;
+}
+
+function unfoldIcsLines(text) {
+  const raw = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const lines = [];
+  for (const line of raw) {
+    if (/^[ \t]/.test(line) && lines.length) lines[lines.length - 1] += line.slice(1);
+    else lines.push(line);
+  }
+  return lines;
+}
+
+function unescapeIcsValue(value) {
+  return String(value || '')
+    .replace(/\\n/gi, '\n')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(/\\\\/g, '\\')
+    .trim();
+}
+
+function parseIcsDate(value) {
+  const raw = String(value || '').trim();
+  let match = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 0, 0, 0);
+  }
+
+  match = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+  if (match) {
+    return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6])));
+  }
+
+  match = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]), Number(match[6]));
+  }
+
+  return null;
+}
+
+function parseIcsEvents(icsText) {
+  const lines = unfoldIcsLines(icsText);
+  const events = [];
+  let current = null;
+
+  for (const line of lines) {
+    if (line === 'BEGIN:VEVENT') {
+      current = {};
+      continue;
+    }
+    if (line === 'END:VEVENT') {
+      if (current?.summary && current?.start) events.push(current);
+      current = null;
+      continue;
+    }
+    if (!current) continue;
+
+    const sep = line.indexOf(':');
+    if (sep === -1) continue;
+    const left = line.slice(0, sep);
+    const value = line.slice(sep + 1);
+    const key = left.split(';')[0].toUpperCase();
+
+    if (key === 'SUMMARY') current.summary = unescapeIcsValue(value);
+    if (key === 'LOCATION') current.location = unescapeIcsValue(value);
+    if (key === 'DESCRIPTION') current.description = unescapeIcsValue(value);
+    if (key === 'DTSTART') current.start = parseIcsDate(value);
+    if (key === 'DTEND') current.end = parseIcsDate(value);
+  }
+
+  return events
+    .filter(event => event.start instanceof Date && !Number.isNaN(event.start.getTime()))
+    .sort((a, b) => a.start - b.start);
+}
+
+function startOfToday() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+}
+
+function endOfToday() {
+  const start = startOfToday();
+  return new Date(start.getTime() + 24 * 60 * 60 * 1000);
+}
+
+function formatEventTime(event) {
+  const datePart = event.start.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  const start = event.start.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (!event.end || Number.isNaN(event.end.getTime())) return `${datePart}, ${start}`;
+  const end = event.end.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  return `${datePart}, ${start} - ${end}`;
+}
+
+async function getFortniteEventsInRange(from, to, limit) {
+  const icsText = await fetchFortniteCalendarText();
+  return parseIcsEvents(icsText)
+    .filter(event => event.start >= from && event.start < to)
+    .slice(0, limit);
+}
+
+function buildFortniteEventsMessage(events, title) {
+  const lines = [];
+  lines.push(`**${title}**`);
+  lines.push('');
+
+  if (!events.length) {
+    lines.push('No Fortnite events found for this range.');
+    return lines.join('\n');
+  }
+
+  for (const event of events) {
+    lines.push(`📅 **${event.summary}**`);
+    lines.push(`⏰ ${formatEventTime(event)}`);
+    if (event.location) lines.push(`📍 ${event.location}`);
+    lines.push('');
+  }
+
+  return lines.join('\n').trim();
+}
+
+async function handleFortniteEvents(interaction, mode) {
+  const limit = interaction.options.getInteger('limit') || (mode === 'today' ? 15 : 10);
+  let from;
+  let to;
+  let title;
+
+  if (mode === 'today') {
+    from = startOfToday();
+    to = endOfToday();
+    title = "Today's Fortnite Events";
+  } else {
+    const days = interaction.options.getInteger('days') || 7;
+    from = new Date(Date.now() - 60 * 60 * 1000);
+    to = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    title = `Upcoming Fortnite Events - next ${days} days`;
+  }
+
+  const events = await getFortniteEventsInRange(from, to, limit);
+  await sendLongReply(interaction, buildFortniteEventsMessage(events, title));
+}
+
+async function handleFortniteEventsPost(interaction) {
+  const channel = interaction.options.getChannel('channel');
+  if (!isUsableTextChannel(channel)) return safeEdit(interaction, 'Please select a valid text channel.');
+
+  const days = interaction.options.getInteger('days') || 7;
+  const limit = interaction.options.getInteger('limit') || 10;
+  const from = new Date(Date.now() - 60 * 60 * 1000);
+  const to = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  const events = await getFortniteEventsInRange(from, to, limit);
+  const message = buildFortniteEventsMessage(events, `Upcoming Fortnite Events - next ${days} days`);
+
+  for (const chunk of splitText(message, 1900)) await channel.send(chunk);
+  await safeEdit(interaction, `Posted ${events.length} Fortnite event(s) in ${channel}.`);
+}
+
 client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
   checkExpiredEventBans();
   setInterval(checkExpiredEventBans, 60 * 1000);
-  checkFortniteCalendarAutoPost();
-  setInterval(checkFortniteCalendarAutoPost, 60 * 1000);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -1161,8 +1105,8 @@ client.on('interactionCreate', async interaction => {
       case 'eventbanfromchannel': return handleEventBanFromChannel(interaction);
       case 'eventbanremove': return handleEventBanRemove(interaction);
       case 'eventbanlist': return handleEventBanList(interaction);
-      case 'fortniteevents': return handleFortniteEvents(interaction, false);
-      case 'fortniteeventstoday': return handleFortniteEvents(interaction, true);
+      case 'fortniteevents': return handleFortniteEvents(interaction, 'upcoming');
+      case 'fortniteeventstoday': return handleFortniteEvents(interaction, 'today');
       case 'fortniteeventspost': return handleFortniteEventsPost(interaction);
       default: return safeEdit(interaction, 'Unknown command.');
     }

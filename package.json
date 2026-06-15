@@ -1,7 +1,7 @@
 {
   "name": "gt-role-bot",
-  "version": "7.0.0",
-  "description": "GT Role Bot with role tools, signup checks, Twitch proof checks and voice channel tools.",
+  "version": "7.1.0",
+  "description": "GT Role Bot with role tools, signup checks, Twitch proof checks, voice channels, event bans and Fortnite ICS calendar.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
