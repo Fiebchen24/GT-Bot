@@ -27,5 +27,15 @@
   ],
   "eventBanLogChannelId": "",
   "fortniteCalendarIcsUrl": "",
-  "fortniteCalendarIcsFile": ""
+  "fortniteCalendarIcsFile": "",
+  "fortniteTimezone": "Europe/Berlin",
+  "autoFortniteEvents": {
+    "enabled": false,
+    "channelId": "",
+    "time": "09:00",
+    "timezone": "Europe/Berlin",
+    "region": "EU",
+    "days": 1,
+    "keyword": ""
+  }
 }
