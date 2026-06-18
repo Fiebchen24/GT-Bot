@@ -16,7 +16,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V7.3 LOADED');
+console.log('GT ROLE BOT V7.4 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -133,6 +133,24 @@ const commands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
 ,
 
+
+  new SlashCommandBuilder()
+    .setName('twitchwatchadd')
+    .setDescription('Add a Twitch channel for live notifications.')
+    .addStringOption(o => o.setName('username').setDescription('Twitch username, e.g. fiebchen').setRequired(true))
+    .addChannelOption(o => o.setName('channel').setDescription('Discord channel for live notifications').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement).setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName('twitchwatchremove')
+    .setDescription('Remove a Twitch channel from live notifications.')
+    .addStringOption(o => o.setName('username').setDescription('Twitch username to remove').setRequired(true))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName('twitchwatchlist')
+    .setDescription('List Twitch live notification watches.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
   new SlashCommandBuilder()
     .setName('fortniteevents')
     .setDescription('Show upcoming Fortnite events from the ICS calendar.')
@@ -896,6 +914,158 @@ async function handleEventBanList(interaction) {
 }
 
 
+
+const TWITCH_WATCH_FILE = path.join(__dirname, 'twitchWatch.json');
+
+function normalizeTwitchLogin(username) {
+  return String(username || '')
+    .trim()
+    .replace(/^https?:\/\/(www\.)?twitch\.tv\//i, '')
+    .replace(/^@/, '')
+    .split(/[\s/?#]/)[0]
+    .toLowerCase();
+}
+
+function loadTwitchWatchStore() {
+  const fromConfig = Array.isArray(config.twitchLiveNotifications?.watchers)
+    ? config.twitchLiveNotifications.watchers
+    : [];
+
+  let fromFile = [];
+  try {
+    if (fs.existsSync(TWITCH_WATCH_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(TWITCH_WATCH_FILE, 'utf8'));
+      fromFile = Array.isArray(parsed.watchers) ? parsed.watchers : [];
+    }
+  } catch (error) {
+    console.error('Could not load twitchWatch.json:', error.message);
+  }
+
+  const merged = new Map();
+  for (const watcher of [...fromConfig, ...fromFile]) {
+    const login = normalizeTwitchLogin(watcher.username || watcher.login || watcher.twitchUser);
+    const channelId = String(watcher.channelId || watcher.discordChannelId || '').trim();
+    if (!login || !channelId) continue;
+    merged.set(login, {
+      username: login,
+      channelId,
+      lastLive: Boolean(watcher.lastLive),
+      lastStreamId: watcher.lastStreamId || '',
+      lastNotifiedAt: watcher.lastNotifiedAt || ''
+    });
+  }
+
+  return { watchers: [...merged.values()] };
+}
+
+function saveTwitchWatchStore(store) {
+  fs.writeFileSync(TWITCH_WATCH_FILE, JSON.stringify({ watchers: store.watchers || [] }, null, 2));
+}
+
+function buildTwitchLiveMessage(stream) {
+  const login = stream.user_login || stream.user_name;
+  const title = stream.title ? `\n📝 ${stream.title}` : '';
+  const game = stream.game_name ? `\n🎮 ${stream.game_name}` : '';
+  return `🔴 **${stream.user_name || login} is LIVE on Twitch!**${game}${title}\n📺 https://twitch.tv/${login}`;
+}
+
+async function fetchTwitchStreamsByLogin(logins) {
+  const unique = [...new Set((logins || []).map(normalizeTwitchLogin).filter(Boolean))];
+  const streams = [];
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    if (!chunk.length) continue;
+    const query = chunk.map(n => `user_login=${encodeURIComponent(n)}`).join('&');
+    const data = await twitchApi(`streams?${query}`);
+    streams.push(...(data.data || []));
+  }
+  return streams;
+}
+
+async function checkTwitchLiveNotifications() {
+  const store = loadTwitchWatchStore();
+  if (!store.watchers.length) return;
+
+  try {
+    const streams = await fetchTwitchStreamsByLogin(store.watchers.map(w => w.username));
+    const liveByLogin = new Map(streams.map(s => [String(s.user_login).toLowerCase(), s]));
+    let changed = false;
+
+    for (const watcher of store.watchers) {
+      const stream = liveByLogin.get(watcher.username);
+      const wasLive = Boolean(watcher.lastLive);
+
+      if (stream) {
+        const isNewStream = watcher.lastStreamId !== stream.id;
+        if (!wasLive || isNewStream) {
+          const channel = await client.channels.fetch(watcher.channelId).catch(() => null);
+          if (isUsableTextChannel(channel)) {
+            await channel.send(buildTwitchLiveMessage(stream));
+            console.log(`Twitch live notification sent for ${watcher.username}.`);
+          } else {
+            console.warn(`Twitch live notification channel invalid for ${watcher.username}: ${watcher.channelId}`);
+          }
+        }
+        watcher.lastLive = true;
+        watcher.lastStreamId = stream.id;
+        watcher.lastNotifiedAt = new Date().toISOString();
+        changed = true;
+      } else if (wasLive || watcher.lastStreamId) {
+        watcher.lastLive = false;
+        watcher.lastStreamId = '';
+        changed = true;
+      }
+    }
+
+    if (changed) saveTwitchWatchStore(store);
+  } catch (error) {
+    console.error('Twitch live notification check failed:', error.message);
+  }
+}
+
+async function handleTwitchWatchAdd(interaction) {
+  const username = normalizeTwitchLogin(interaction.options.getString('username'));
+  const channel = interaction.options.getChannel('channel');
+  if (!username) return safeEdit(interaction, 'Please enter a valid Twitch username.');
+  if (!isUsableTextChannel(channel)) return safeEdit(interaction, 'Please select a valid text channel.');
+
+  // Validate that the Twitch user exists.
+  const users = await twitchApi(`users?login=${encodeURIComponent(username)}`);
+  const user = (users.data || [])[0];
+  if (!user) return safeEdit(interaction, `Twitch user not found: ${username}`);
+
+  const store = loadTwitchWatchStore();
+  const existing = store.watchers.find(w => w.username === username);
+  if (existing) {
+    existing.channelId = channel.id;
+  } else {
+    store.watchers.push({ username, channelId: channel.id, lastLive: false, lastStreamId: '', lastNotifiedAt: '' });
+  }
+  saveTwitchWatchStore(store);
+
+  await safeEdit(interaction, `Twitch live notifications ${existing ? 'updated' : 'enabled'} for **${user.display_name || username}** in ${channel}.`);
+}
+
+async function handleTwitchWatchRemove(interaction) {
+  const username = normalizeTwitchLogin(interaction.options.getString('username'));
+  const store = loadTwitchWatchStore();
+  const before = store.watchers.length;
+  store.watchers = store.watchers.filter(w => w.username !== username);
+  saveTwitchWatchStore(store);
+  const removed = before - store.watchers.length;
+  await safeEdit(interaction, removed ? `Removed Twitch live notifications for **${username}**.` : `No Twitch live notification watch found for **${username}**.`);
+}
+
+async function handleTwitchWatchList(interaction) {
+  const store = loadTwitchWatchStore();
+  if (!store.watchers.length) return safeEdit(interaction, 'No Twitch live notification watches configured.');
+  const lines = ['**Twitch Live Notifications**', ''];
+  for (const watcher of store.watchers) {
+    lines.push(`• **${watcher.username}** → <#${watcher.channelId}> ${watcher.lastLive ? '🔴 currently marked live' : ''}`.trim());
+  }
+  await sendLongReply(interaction, lines.join('\n'));
+}
+
 function getFortniteCalendarSource() {
   const url = process.env.FORTNITE_CALENDAR_ICS_URL || config.fortniteCalendarIcsUrl || config.fortniteCalendarUrl || '';
   const file = process.env.FORTNITE_CALENDAR_ICS_FILE || config.fortniteCalendarIcsFile || '';
@@ -1276,6 +1446,8 @@ client.once('clientReady', () => {
   setInterval(checkExpiredEventBans, 60 * 1000);
   checkAutoFortniteEvents();
   setInterval(checkAutoFortniteEvents, 60 * 1000);
+  checkTwitchLiveNotifications();
+  setInterval(checkTwitchLiveNotifications, Number(process.env.TWITCH_NOTIFY_INTERVAL_SECONDS || config.twitchLiveNotifications?.intervalSeconds || 60) * 1000);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -1297,6 +1469,9 @@ client.on('interactionCreate', async interaction => {
       case 'eventbanfromchannel': await handleEventBanFromChannel(interaction); break;
       case 'eventbanremove': await handleEventBanRemove(interaction); break;
       case 'eventbanlist': await handleEventBanList(interaction); break;
+      case 'twitchwatchadd': await handleTwitchWatchAdd(interaction); break;
+      case 'twitchwatchremove': await handleTwitchWatchRemove(interaction); break;
+      case 'twitchwatchlist': await handleTwitchWatchList(interaction); break;
       case 'fortniteevents': await handleFortniteEvents(interaction, 'upcoming'); break;
       case 'fortniteeventstoday': await handleFortniteEvents(interaction, 'today'); break;
       case 'fortniteeventspost': await handleFortniteEventsPost(interaction); break;

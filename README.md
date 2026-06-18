@@ -1,96 +1,70 @@
-# GT Role Bot V7.3
+# GT Role Bot V7.4
 
-Nach dem Deploy muss im Render Log stehen:
+GT utility bot for Discord.
 
-```txt
-GT ROLE BOT V7.3 LOADED
-```
+## Features
 
-## Fortnite Calendar / ICS
+- Give role from channel
+- Take role from channel
+- Earnings role updates
+- Pre-cup signup check with Twitch links or DC proof
+- Post-cup Twitch/VOD proof check
+- Voice channel create/delete/delete all
+- Event bans with automatic expiry and log channel
+- Fortnite ICS calendar commands and automatic morning posts
+- Twitch live notifications
 
-Der Bot liest Fortnite Events aus einem ICS Kalender. Cito ist nicht mehr nötig.
-
-### ICS Link in Render Environment
+## Required Render environment variables
 
 ```env
-FORTNITE_CALENDAR_ICS_URL=DEIN_ICS_LINK
-FORTNITE_TIMEZONE=Europe/Berlin
+TOKEN=your_discord_bot_token
+CLIENT_ID=your_discord_application_id
+GUILD_ID=your_discord_server_id
+TWITCH_CLIENT_ID=your_twitch_client_id
+TWITCH_CLIENT_SECRET=your_twitch_client_secret
 ```
 
-Oder in `config.json`:
+Optional:
 
-```json
-"fortniteCalendarIcsUrl": "DEIN_ICS_LINK",
-"fortniteTimezone": "Europe/Berlin"
+```env
+FORTNITE_CALENDAR_ICS_URL=your_ics_url
+AUTO_FORTNITE_EVENTS_ENABLED=true
+AUTO_FORTNITE_EVENTS_CHANNEL_ID=your_channel_id
+AUTO_FORTNITE_EVENTS_TIME=09:00
+AUTO_FORTNITE_EVENTS_TIMEZONE=Europe/Berlin
+AUTO_FORTNITE_EVENTS_REGION=ALL
+AUTO_FORTNITE_EVENTS_DAYS=1
+TWITCH_NOTIFY_INTERVAL_SECONDS=60
 ```
 
-Falls der Link HTTP 403 gibt, ist er privat/blockiert. Dann eine öffentliche `.ics` Export-URL nutzen oder die Datei als `fortnite-events.ics` ins GitHub Repo legen und setzen:
-
-```json
-"fortniteCalendarIcsFile": "fortnite-events.ics"
-```
-
-## Fortnite Commands
+## Twitch live notification commands
 
 ```txt
-/fortniteevents
-/fortniteeventstoday
-/fortniteeventspost
-/fortniteeventsgrouped
+/twitchwatchadd username:fiebchen channel:#live-now
+/twitchwatchremove username:fiebchen
+/twitchwatchlist
 ```
 
-`/fortniteeventsgrouped` postet gruppiert nach:
+The bot checks watched Twitch channels every 60 seconds by default. It posts only when a watched channel changes from offline to live or starts a new stream.
 
-- FNCS
-- Cash Cups
-- Victory Cups
-- Ranked Cups
-- Console
-- Zero Build
-- Reload
-- Other Events
-
-Optionen:
-
-```txt
-channel = Zielchannel
-days = 1-14
-region = EU / NAC / OCE / ASIA / ALL
-keyword = optional, z. B. FNCS, Ranked, ZB
-```
-
-## Automatischer Morgenpost
-
-Du kannst den automatischen täglichen Post über `config.json` aktivieren:
+You can also configure permanent watchers in `config.json`:
 
 ```json
-"autoFortniteEvents": {
-  "enabled": true,
-  "channelId": "DEIN_CHANNEL_ID",
-  "time": "09:00",
-  "timezone": "Europe/Berlin",
-  "region": "EU",
-  "days": 1,
-  "keyword": ""
+"twitchLiveNotifications": {
+  "intervalSeconds": 60,
+  "watchers": [
+    { "username": "fiebchen", "channelId": "DISCORD_CHANNEL_ID" }
+  ]
 }
 ```
 
-Oder über Render Environment:
-
-```env
-AUTO_FORTNITE_EVENTS_ENABLED=true
-AUTO_FORTNITE_EVENTS_CHANNEL_ID=DEIN_CHANNEL_ID
-AUTO_FORTNITE_EVENTS_TIME=09:00
-AUTO_FORTNITE_EVENTS_TIMEZONE=Europe/Berlin
-AUTO_FORTNITE_EVENTS_REGION=EU
-AUTO_FORTNITE_EVENTS_DAYS=1
-AUTO_FORTNITE_EVENTS_KEYWORD=
-```
-
-Der Bot prüft jede Minute, ob die eingestellte Uhrzeit erreicht ist, und postet pro Tag nur einmal.
-
 ## Deploy
 
-1. GitHub Dateien ersetzen
-2. Commit
-3. Render: Manual Deploy -> Clear build cache & deploy
+1. Replace the files in GitHub.
+2. Commit changes.
+3. Render → Manual Deploy → Clear build cache & deploy.
+4. Log should show:
+
+```txt
+GT ROLE BOT V7.4 LOADED
+```

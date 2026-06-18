@@ -34,8 +34,12 @@
     "channelId": "",
     "time": "09:00",
     "timezone": "Europe/Berlin",
-    "region": "EU",
+    "region": "ALL",
     "days": 1,
     "keyword": ""
+  },
+  "twitchLiveNotifications": {
+    "intervalSeconds": 60,
+    "watchers": []
   }
 }
