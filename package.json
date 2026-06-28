@@ -1,7 +1,7 @@
 {
   "name": "gt-role-bot",
-  "version": "7.7.0",
-  "description": "GT Utility Bot with persistent Twitch notifications, birthdays, role tools, signup checks, Twitch proof checks, voice channels, event bans and Fortnite ICS calendar.",
+  "version": "7.8.0",
+  "description": "GT Utility Bot with local JSON birthdays and Twitch notifications, role tools, signup checks, Twitch proof checks, voice channels, event bans and Fortnite ICS calendar.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "discord.js": "^14.16.3",
-    "dotenv": "^16.4.5",
-    "pg": "^8.13.1"
+    "dotenv": "^16.4.5"
   }
 }

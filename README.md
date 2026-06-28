@@ -4,7 +4,7 @@ Render/GitHub-ready Discord utility bot for GT.
 
 ## New in V7.7
 
-Twitch live notification watches are now saved in PostgreSQL when `DATABASE_URL` is set.
+Twitch live notification watches are now saved in local JSON files when `DATABASE_URL` is set.
 
 This fixes the issue where the bot loses Twitch watch data after Render redeploys or restarts.
 
@@ -24,7 +24,6 @@ TWITCH_CLIENT_SECRET=
 FORTNITE_CALENDAR_ICS_URL=
 BIRTHDAY_CHANNEL_ID=
 DATABASE_URL=
-DATABASE_SSL=true
 ```
 
 Optional:

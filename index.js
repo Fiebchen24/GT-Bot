@@ -2,8 +2,8 @@ require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
-let Pool;
-try { ({ Pool } = require('pg')); } catch { Pool = null; }
+// PostgreSQL temporarily disabled. Storage uses local JSON files.
+const Pool = null;
 
 const {
   Client,
@@ -18,7 +18,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V7.7 LOADED');
+console.log('GT ROLE BOT V7.8 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -955,7 +955,7 @@ function normalizeTwitchLogin(username) {
 
 async function initTwitchWatchDatabase() {
   if (!birthdayPool) {
-    console.log('Twitch watch storage: twitchWatch.json fallback. Add DATABASE_URL for persistent Twitch notification storage.');
+    console.log('Twitch watch storage: twitchWatch.json local file mode.');
     return;
   }
 
@@ -1602,7 +1602,7 @@ const birthdayPool = birthdayDbUrl && Pool
 
 async function initBirthdayDatabase() {
   if (!birthdayPool) {
-    console.log('Birthday storage: birthdays.json fallback. Add DATABASE_URL for persistent database storage.');
+    console.log('Birthday storage: birthdays.json local file mode.');
     return;
   }
 
