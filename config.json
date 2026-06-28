@@ -41,5 +41,8 @@
   "twitchLiveNotifications": {
     "intervalSeconds": 60,
     "watchers": []
-  }
+  },
+  "birthdayChannelId": "",
+  "birthdayDefaultTimezone": "Europe/Berlin",
+  "birthdayDefaultTime": "09:00"
 }

@@ -2,6 +2,8 @@ require('dotenv').config();
 
 const fs = require('fs');
 const path = require('path');
+let Pool;
+try { ({ Pool } = require('pg')); } catch { Pool = null; }
 
 const {
   Client,
@@ -16,7 +18,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V7.4 LOADED');
+console.log('GT ROLE BOT V7.7 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -180,6 +182,30 @@ const commands = [
     .addStringOption(o => o.setName('region').setDescription('Region filter, e.g. EU, NAC, ALL'))
     .addStringOption(o => o.setName('keyword').setDescription('Optional keyword filter, e.g. FNCS, Ranked, ZB'))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+,
+  new SlashCommandBuilder()
+    .setName('birthdayset')
+    .setDescription('Set your own birthday reminder.')
+    .addIntegerOption(o => o.setName('day').setDescription('Day of month, e.g. 24').setMinValue(1).setMaxValue(31).setRequired(true))
+    .addIntegerOption(o => o.setName('month').setDescription('Month, e.g. 6 for June').setMinValue(1).setMaxValue(12).setRequired(true))
+    .addIntegerOption(o => o.setName('year').setDescription('Optional birth year, only if you want GT to know your age').setMinValue(1900).setMaxValue(new Date().getFullYear()))
+    .addStringOption(o => o.setName('timezone').setDescription('Timezone, default Europe/Berlin, e.g. Europe/London, America/New_York'))
+    .addStringOption(o => o.setName('reminder_time').setDescription('Reminder time in your timezone, HH:MM, default 09:00')),
+
+  new SlashCommandBuilder()
+    .setName('birthdayremove')
+    .setDescription('Remove your own birthday reminder.'),
+
+  new SlashCommandBuilder()
+    .setName('birthdaynext')
+    .setDescription('Show upcoming GT birthdays.')
+    .addIntegerOption(o => o.setName('limit').setDescription('How many birthdays to show, default 10').setMinValue(1).setMaxValue(25)),
+
+  new SlashCommandBuilder()
+    .setName('birthdaylist')
+    .setDescription('Staff: list all saved birthdays.')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+
 ].map(c => c.toJSON());
 
 async function registerCommands() {
@@ -915,6 +941,7 @@ async function handleEventBanList(interaction) {
 
 
 
+
 const TWITCH_WATCH_FILE = path.join(__dirname, 'twitchWatch.json');
 
 function normalizeTwitchLogin(username) {
@@ -926,11 +953,29 @@ function normalizeTwitchLogin(username) {
     .toLowerCase();
 }
 
-function loadTwitchWatchStore() {
-  const fromConfig = Array.isArray(config.twitchLiveNotifications?.watchers)
-    ? config.twitchLiveNotifications.watchers
-    : [];
+async function initTwitchWatchDatabase() {
+  if (!birthdayPool) {
+    console.log('Twitch watch storage: twitchWatch.json fallback. Add DATABASE_URL for persistent Twitch notification storage.');
+    return;
+  }
 
+  await birthdayPool.query(`
+    CREATE TABLE IF NOT EXISTS gt_twitch_watchers (
+      guild_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      last_live BOOLEAN NOT NULL DEFAULT FALSE,
+      last_stream_id TEXT NOT NULL DEFAULT '',
+      last_notified_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (guild_id, username)
+    );
+  `);
+
+  console.log('Twitch watch storage: PostgreSQL database connected.');
+}
+
+function loadTwitchWatchStoreFromFile() {
   let fromFile = [];
   try {
     if (fs.existsSync(TWITCH_WATCH_FILE)) {
@@ -940,26 +985,131 @@ function loadTwitchWatchStore() {
   } catch (error) {
     console.error('Could not load twitchWatch.json:', error.message);
   }
+  return fromFile;
+}
+
+function normalizeWatcherRecord(watcher, fallbackGuildId = GUILD_ID) {
+  const login = normalizeTwitchLogin(watcher.username || watcher.login || watcher.twitchUser);
+  const channelId = String(watcher.channelId || watcher.discordChannelId || '').trim();
+  const guildId = String(watcher.guildId || watcher.guild_id || fallbackGuildId || '').trim();
+  if (!login || !channelId || !guildId) return null;
+  return {
+    guildId,
+    username: login,
+    channelId,
+    lastLive: Boolean(watcher.lastLive ?? watcher.last_live),
+    lastStreamId: watcher.lastStreamId || watcher.last_stream_id || '',
+    lastNotifiedAt: watcher.lastNotifiedAt || watcher.last_notified_at || ''
+  };
+}
+
+async function loadTwitchWatchStore() {
+  const fromConfig = Array.isArray(config.twitchLiveNotifications?.watchers)
+    ? config.twitchLiveNotifications.watchers
+    : [];
+
+  let storedWatchers = [];
+  if (birthdayPool) {
+    try {
+      const result = await birthdayPool.query('SELECT * FROM gt_twitch_watchers');
+      storedWatchers = result.rows.map(row => ({
+        guildId: row.guild_id,
+        username: row.username,
+        channelId: row.channel_id,
+        lastLive: row.last_live,
+        lastStreamId: row.last_stream_id || '',
+        lastNotifiedAt: row.last_notified_at ? new Date(row.last_notified_at).toISOString() : ''
+      }));
+    } catch (error) {
+      console.error('Could not load Twitch watchers from database:', error.message);
+    }
+  } else {
+    storedWatchers = loadTwitchWatchStoreFromFile();
+  }
 
   const merged = new Map();
-  for (const watcher of [...fromConfig, ...fromFile]) {
-    const login = normalizeTwitchLogin(watcher.username || watcher.login || watcher.twitchUser);
-    const channelId = String(watcher.channelId || watcher.discordChannelId || '').trim();
-    if (!login || !channelId) continue;
-    merged.set(login, {
-      username: login,
-      channelId,
-      lastLive: Boolean(watcher.lastLive),
-      lastStreamId: watcher.lastStreamId || '',
-      lastNotifiedAt: watcher.lastNotifiedAt || ''
-    });
+  for (const raw of [...fromConfig, ...storedWatchers]) {
+    const watcher = normalizeWatcherRecord(raw);
+    if (!watcher) continue;
+    merged.set(`${watcher.guildId}:${watcher.username}`, watcher);
   }
 
   return { watchers: [...merged.values()] };
 }
 
-function saveTwitchWatchStore(store) {
-  fs.writeFileSync(TWITCH_WATCH_FILE, JSON.stringify({ watchers: store.watchers || [] }, null, 2));
+async function saveTwitchWatchStore(store) {
+  const watchers = (store.watchers || []).map(w => normalizeWatcherRecord(w)).filter(Boolean);
+
+  if (birthdayPool) {
+    const clientDb = await birthdayPool.connect();
+    try {
+      await clientDb.query('BEGIN');
+      for (const watcher of watchers) {
+        await clientDb.query(
+          `INSERT INTO gt_twitch_watchers (guild_id, username, channel_id, last_live, last_stream_id, last_notified_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, NOW())
+           ON CONFLICT (guild_id, username)
+           DO UPDATE SET
+             channel_id = EXCLUDED.channel_id,
+             last_live = EXCLUDED.last_live,
+             last_stream_id = EXCLUDED.last_stream_id,
+             last_notified_at = EXCLUDED.last_notified_at,
+             updated_at = NOW()`,
+          [watcher.guildId, watcher.username, watcher.channelId, watcher.lastLive, watcher.lastStreamId || '', watcher.lastNotifiedAt || null]
+        );
+      }
+      await clientDb.query('COMMIT');
+    } catch (error) {
+      await clientDb.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      clientDb.release();
+    }
+    return;
+  }
+
+  fs.writeFileSync(TWITCH_WATCH_FILE, JSON.stringify({ watchers }, null, 2));
+}
+
+async function upsertTwitchWatcher(watcher) {
+  const normalized = normalizeWatcherRecord(watcher);
+  if (!normalized) throw new Error('Invalid Twitch watcher.');
+
+  if (birthdayPool) {
+    await birthdayPool.query(
+      `INSERT INTO gt_twitch_watchers (guild_id, username, channel_id, last_live, last_stream_id, last_notified_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
+       ON CONFLICT (guild_id, username)
+       DO UPDATE SET
+         channel_id = EXCLUDED.channel_id,
+         last_live = EXCLUDED.last_live,
+         last_stream_id = EXCLUDED.last_stream_id,
+         last_notified_at = EXCLUDED.last_notified_at,
+         updated_at = NOW()`,
+      [normalized.guildId, normalized.username, normalized.channelId, normalized.lastLive, normalized.lastStreamId || '', normalized.lastNotifiedAt || null]
+    );
+    return;
+  }
+
+  const store = await loadTwitchWatchStore();
+  const existing = store.watchers.find(w => w.guildId === normalized.guildId && w.username === normalized.username);
+  if (existing) Object.assign(existing, normalized);
+  else store.watchers.push(normalized);
+  await saveTwitchWatchStore(store);
+}
+
+async function removeTwitchWatcher(guildId, username) {
+  const login = normalizeTwitchLogin(username);
+  if (birthdayPool) {
+    const result = await birthdayPool.query('DELETE FROM gt_twitch_watchers WHERE guild_id = $1 AND username = $2', [guildId, login]);
+    return result.rowCount;
+  }
+
+  const store = await loadTwitchWatchStore();
+  const before = store.watchers.length;
+  store.watchers = store.watchers.filter(w => !(w.guildId === guildId && w.username === login));
+  await saveTwitchWatchStore(store);
+  return before - store.watchers.length;
 }
 
 function buildTwitchLiveMessage(stream) {
@@ -983,7 +1133,7 @@ async function fetchTwitchStreamsByLogin(logins) {
 }
 
 async function checkTwitchLiveNotifications() {
-  const store = loadTwitchWatchStore();
+  const store = await loadTwitchWatchStore();
   if (!store.watchers.length) return;
 
   try {
@@ -1017,7 +1167,7 @@ async function checkTwitchLiveNotifications() {
       }
     }
 
-    if (changed) saveTwitchWatchStore(store);
+    if (changed) await saveTwitchWatchStore(store);
   } catch (error) {
     console.error('Twitch live notification check failed:', error.message);
   }
@@ -1034,33 +1184,32 @@ async function handleTwitchWatchAdd(interaction) {
   const user = (users.data || [])[0];
   if (!user) return safeEdit(interaction, `Twitch user not found: ${username}`);
 
-  const store = loadTwitchWatchStore();
-  const existing = store.watchers.find(w => w.username === username);
-  if (existing) {
-    existing.channelId = channel.id;
-  } else {
-    store.watchers.push({ username, channelId: channel.id, lastLive: false, lastStreamId: '', lastNotifiedAt: '' });
-  }
-  saveTwitchWatchStore(store);
+  const store = await loadTwitchWatchStore();
+  const existing = store.watchers.find(w => w.guildId === interaction.guildId && w.username === username);
+  await upsertTwitchWatcher({
+    guildId: interaction.guildId,
+    username,
+    channelId: channel.id,
+    lastLive: existing ? existing.lastLive : false,
+    lastStreamId: existing ? existing.lastStreamId : '',
+    lastNotifiedAt: existing ? existing.lastNotifiedAt : ''
+  });
 
   await safeEdit(interaction, `Twitch live notifications ${existing ? 'updated' : 'enabled'} for **${user.display_name || username}** in ${channel}.`);
 }
 
 async function handleTwitchWatchRemove(interaction) {
   const username = normalizeTwitchLogin(interaction.options.getString('username'));
-  const store = loadTwitchWatchStore();
-  const before = store.watchers.length;
-  store.watchers = store.watchers.filter(w => w.username !== username);
-  saveTwitchWatchStore(store);
-  const removed = before - store.watchers.length;
+  const removed = await removeTwitchWatcher(interaction.guildId, username);
   await safeEdit(interaction, removed ? `Removed Twitch live notifications for **${username}**.` : `No Twitch live notification watch found for **${username}**.`);
 }
 
 async function handleTwitchWatchList(interaction) {
-  const store = loadTwitchWatchStore();
-  if (!store.watchers.length) return safeEdit(interaction, 'No Twitch live notification watches configured.');
+  const store = await loadTwitchWatchStore();
+  const watchers = store.watchers.filter(w => w.guildId === interaction.guildId);
+  if (!watchers.length) return safeEdit(interaction, 'No Twitch live notification watches configured.');
   const lines = ['**Twitch Live Notifications**', ''];
-  for (const watcher of store.watchers) {
+  for (const watcher of watchers) {
     lines.push(`• **${watcher.username}** → <#${watcher.channelId}> ${watcher.lastLive ? '🔴 currently marked live' : ''}`.trim());
   }
   await sendLongReply(interaction, lines.join('\n'));
@@ -1440,14 +1589,297 @@ async function checkAutoFortniteEvents() {
   }
 }
 
-client.once('clientReady', () => {
+
+const BIRTHDAYS_FILE = path.join(__dirname, 'birthdays.json');
+
+const birthdayDbUrl = process.env.DATABASE_URL || process.env.BIRTHDAY_DATABASE_URL || '';
+const birthdayPool = birthdayDbUrl && Pool
+  ? new Pool({
+      connectionString: birthdayDbUrl,
+      ssl: process.env.DATABASE_SSL === 'false' ? false : { rejectUnauthorized: false }
+    })
+  : null;
+
+async function initBirthdayDatabase() {
+  if (!birthdayPool) {
+    console.log('Birthday storage: birthdays.json fallback. Add DATABASE_URL for persistent database storage.');
+    return;
+  }
+
+  await birthdayPool.query(`
+    CREATE TABLE IF NOT EXISTS gt_birthdays (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      day INTEGER NOT NULL,
+      month INTEGER NOT NULL,
+      birth_year INTEGER,
+      timezone TEXT NOT NULL DEFAULT 'Europe/Berlin',
+      reminder_time TEXT NOT NULL DEFAULT '09:00',
+      last_sent_year INTEGER,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (guild_id, user_id)
+    );
+  `);
+
+  console.log('Birthday storage: PostgreSQL database connected.');
+}
+
+function loadBirthdayStore() {
+  try {
+    if (!fs.existsSync(BIRTHDAYS_FILE)) return { birthdays: [] };
+    const parsed = JSON.parse(fs.readFileSync(BIRTHDAYS_FILE, 'utf8'));
+    return { birthdays: Array.isArray(parsed.birthdays) ? parsed.birthdays : [] };
+  } catch (error) {
+    console.error('Could not load birthdays.json:', error);
+    return { birthdays: [] };
+  }
+}
+
+function saveBirthdayStore(store) {
+  fs.writeFileSync(BIRTHDAYS_FILE, JSON.stringify(store, null, 2));
+}
+
+function rowToBirthday(row) {
+  return {
+    guildId: row.guild_id,
+    userId: row.user_id,
+    day: row.day,
+    month: row.month,
+    birthYear: row.birth_year || null,
+    timezone: row.timezone,
+    reminderTime: row.reminder_time,
+    lastSentYear: row.last_sent_year || null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null
+  };
+}
+
+async function getBirthdays(guildId = null) {
+  if (birthdayPool) {
+    const result = guildId
+      ? await birthdayPool.query('SELECT * FROM gt_birthdays WHERE guild_id = $1', [guildId])
+      : await birthdayPool.query('SELECT * FROM gt_birthdays');
+    return result.rows.map(rowToBirthday);
+  }
+
+  const store = loadBirthdayStore();
+  return guildId ? store.birthdays.filter(b => b.guildId === guildId) : store.birthdays;
+}
+
+async function upsertBirthday(record) {
+  if (birthdayPool) {
+    await birthdayPool.query(
+      `INSERT INTO gt_birthdays (guild_id, user_id, day, month, birth_year, timezone, reminder_time, last_sent_year, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NOW())
+       ON CONFLICT (guild_id, user_id)
+       DO UPDATE SET
+         day = EXCLUDED.day,
+         month = EXCLUDED.month,
+         birth_year = EXCLUDED.birth_year,
+         timezone = EXCLUDED.timezone,
+         reminder_time = EXCLUDED.reminder_time,
+         last_sent_year = NULL,
+         updated_at = NOW()`,
+      [record.guildId, record.userId, record.day, record.month, record.birthYear || null, record.timezone, record.reminderTime]
+    );
+    return;
+  }
+
+  const store = loadBirthdayStore();
+  const existing = store.birthdays.find(b => b.guildId === record.guildId && b.userId === record.userId);
+  if (existing) Object.assign(existing, { ...record, lastSentYear: null, updatedAt: new Date().toISOString() });
+  else store.birthdays.push({ ...record, lastSentYear: null, updatedAt: new Date().toISOString() });
+  saveBirthdayStore(store);
+}
+
+async function removeBirthday(guildId, userId) {
+  if (birthdayPool) {
+    const result = await birthdayPool.query('DELETE FROM gt_birthdays WHERE guild_id = $1 AND user_id = $2', [guildId, userId]);
+    return result.rowCount;
+  }
+
+  const store = loadBirthdayStore();
+  const before = store.birthdays.length;
+  store.birthdays = store.birthdays.filter(b => !(b.guildId === guildId && b.userId === userId));
+  saveBirthdayStore(store);
+  return before - store.birthdays.length;
+}
+
+async function markBirthdaySent(guildId, userId, year) {
+  if (birthdayPool) {
+    await birthdayPool.query('UPDATE gt_birthdays SET last_sent_year = $3, updated_at = NOW() WHERE guild_id = $1 AND user_id = $2', [guildId, userId, year]);
+    return;
+  }
+
+  const store = loadBirthdayStore();
+  const birthday = store.birthdays.find(b => b.guildId === guildId && b.userId === userId);
+  if (birthday) {
+    birthday.lastSentYear = year;
+    saveBirthdayStore(store);
+  }
+}
+
+function getBirthdayChannelId() {
+  return process.env.BIRTHDAY_CHANNEL_ID || config.birthdayChannelId || '';
+}
+
+function isValidTimezone(timezone) {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeReminderTime(value) {
+  const raw = String(value || '09:00').trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) throw new Error('Reminder time must be HH:MM, for example 09:00 or 21:30.');
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) throw new Error('Reminder time must be a valid HH:MM time.');
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function isValidBirthdayDate(day, month) {
+  const test = new Date(2024, month - 1, day); // leap year allows Feb 29
+  return test.getMonth() === month - 1 && test.getDate() === day;
+}
+
+function formatBirthdayDate(day, month, birthYear = null) {
+  const base = `${String(day).padStart(2, '0')}.${String(month).padStart(2, '0')}.`;
+  return birthYear ? `${base}${birthYear}` : base;
+}
+
+function nextBirthdayDate(day, month, timezone) {
+  const now = new Date();
+  const parts = getDatePartsInTimezone(now, timezone);
+  let year = Number(parts.dateKey.slice(0, 4));
+  let next = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+
+  const todayKey = parts.dateKey;
+  const birthdayKeyThisYear = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  if (birthdayKeyThisYear < todayKey) next = new Date(Date.UTC(year + 1, month - 1, day, 12, 0, 0));
+  return next;
+}
+
+function daysUntilBirthday(day, month, timezone) {
+  const now = new Date();
+  const parts = getDatePartsInTimezone(now, timezone);
+  const todayUtc = new Date(`${parts.dateKey}T12:00:00Z`);
+  const next = nextBirthdayDate(day, month, timezone);
+  return Math.max(0, Math.round((next.getTime() - todayUtc.getTime()) / (24 * 60 * 60 * 1000)));
+}
+
+function ageTurningThisYear(birthday, year) {
+  if (!birthday.birthYear) return null;
+  const age = Number(year) - Number(birthday.birthYear);
+  return age > 0 && age < 130 ? age : null;
+}
+
+async function handleBirthdaySet(interaction) {
+  const day = interaction.options.getInteger('day');
+  const month = interaction.options.getInteger('month');
+  const birthYear = interaction.options.getInteger('year') || null;
+  const timezone = (interaction.options.getString('timezone') || config.birthdayDefaultTimezone || 'Europe/Berlin').trim();
+  const reminderTime = normalizeReminderTime(interaction.options.getString('reminder_time') || config.birthdayDefaultTime || '09:00');
+
+  if (!isValidBirthdayDate(day, month)) throw new Error('That birthday date is not valid.');
+  if (!isValidTimezone(timezone)) throw new Error('That timezone is not valid. Example: Europe/Berlin, Europe/London, America/New_York.');
+  if (birthYear && birthYear > new Date().getFullYear()) throw new Error('Birth year cannot be in the future.');
+
+  await upsertBirthday({
+    guildId: interaction.guildId,
+    userId: interaction.user.id,
+    day,
+    month,
+    birthYear,
+    timezone,
+    reminderTime
+  });
+
+  const channelId = getBirthdayChannelId();
+  const channelText = channelId ? `<#${channelId}>` : 'No birthday channel configured yet';
+  const yearText = birthYear ? ` with birth year ${birthYear}` : '';
+  await safeEdit(interaction, `🎂 Birthday saved for ${formatBirthdayDate(day, month)}${yearText} at ${reminderTime} (${timezone}).\nReminder channel: ${channelText}`);
+}
+
+async function handleBirthdayRemove(interaction) {
+  const removed = await removeBirthday(interaction.guildId, interaction.user.id);
+  await safeEdit(interaction, removed ? '🎂 Your birthday reminder was removed.' : 'You do not have a saved birthday reminder.');
+}
+
+async function handleBirthdayNext(interaction) {
+  const limit = interaction.options.getInteger('limit') || 10;
+  const items = (await getBirthdays(interaction.guildId))
+    .map(b => ({ ...b, days: daysUntilBirthday(b.day, b.month, b.timezone || 'Europe/Berlin') }))
+    .sort((a, b) => a.days - b.days)
+    .slice(0, limit);
+
+  if (!items.length) return safeEdit(interaction, 'No birthdays saved yet. Players can add theirs with `/birthdayset`.');
+  const lines = items.map(b => {
+    const ageText = b.birthYear ? ` — turns ${ageTurningThisYear(b, Number(getDatePartsInTimezone(new Date(), b.timezone || 'Europe/Berlin').dateKey.slice(0, 4)) + (b.days === 0 ? 0 : 0)) || '?'} ` : '';
+    return `• <@${b.userId}> — ${formatBirthdayDate(b.day, b.month, b.birthYear)}${ageText}— in ${b.days} day${b.days === 1 ? '' : 's'} — ${b.reminderTime || '09:00'} ${b.timezone || 'Europe/Berlin'}`;
+  });
+  await sendLongReply(interaction, `🎂 Upcoming GT Birthdays\n\n${lines.join('\n')}`);
+}
+
+async function handleBirthdayList(interaction) {
+  const items = (await getBirthdays(interaction.guildId))
+    .sort((a, b) => a.month - b.month || a.day - b.day);
+  if (!items.length) return safeEdit(interaction, 'No birthdays saved yet.');
+  const lines = items.map(b => `• <@${b.userId}> — ${formatBirthdayDate(b.day, b.month, b.birthYear)} — ${b.reminderTime || '09:00'} ${b.timezone || 'Europe/Berlin'}`);
+  await sendLongReply(interaction, `🎂 Saved Birthdays (${items.length})\n\n${lines.join('\n')}`);
+}
+
+async function checkBirthdays() {
+  const channelId = getBirthdayChannelId();
+  if (!channelId) return;
+
+  const birthdays = await getBirthdays();
+  if (!birthdays.length) return;
+
+  const now = new Date();
+
+  for (const birthday of birthdays) {
+    const timezone = birthday.timezone || 'Europe/Berlin';
+    const reminderTime = birthday.reminderTime || '09:00';
+    let parts;
+    try { parts = getDatePartsInTimezone(now, timezone); }
+    catch { continue; }
+
+    const [year, month, day] = parts.dateKey.split('-').map(Number);
+    if (day !== birthday.day || month !== birthday.month) continue;
+    if (parts.time !== reminderTime) continue;
+    if (birthday.lastSentYear === year) continue;
+
+    try {
+      const channel = await client.channels.fetch(channelId).catch(() => null);
+      if (!isUsableTextChannel(channel)) continue;
+      const age = ageTurningThisYear(birthday, year);
+      const ageText = age ? `\nToday they turn **${age}**! 🥳` : '';
+      await channel.send(`🎂 Happy Birthday <@${birthday.userId}>! 💜${ageText}\n\nGT wishes you an amazing day, lots of good vibes and many wins today 🥳`);
+      await markBirthdaySent(birthday.guildId, birthday.userId, year);
+    } catch (error) {
+      console.error(`Failed to send birthday reminder for ${birthday.userId}:`, error.message);
+    }
+  }
+}
+
+client.once('clientReady', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  try { await initBirthdayDatabase(); }
+  catch (error) { console.error('Birthday database init failed:', error.message); }
+  try { await initTwitchWatchDatabase(); }
+  catch (error) { console.error('Twitch watch database init failed:', error.message); }
   checkExpiredEventBans();
   setInterval(checkExpiredEventBans, 60 * 1000);
   checkAutoFortniteEvents();
   setInterval(checkAutoFortniteEvents, 60 * 1000);
   checkTwitchLiveNotifications();
   setInterval(checkTwitchLiveNotifications, Number(process.env.TWITCH_NOTIFY_INTERVAL_SECONDS || config.twitchLiveNotifications?.intervalSeconds || 60) * 1000);
+  checkBirthdays();
+  setInterval(checkBirthdays, 60 * 1000);
 });
 
 client.on('interactionCreate', async interaction => {
@@ -1476,6 +1908,10 @@ client.on('interactionCreate', async interaction => {
       case 'fortniteeventstoday': await handleFortniteEvents(interaction, 'today'); break;
       case 'fortniteeventspost': await handleFortniteEventsPost(interaction); break;
       case 'fortniteeventsgrouped': await handleFortniteEventsGrouped(interaction); break;
+      case 'birthdayset': await handleBirthdaySet(interaction); break;
+      case 'birthdayremove': await handleBirthdayRemove(interaction); break;
+      case 'birthdaynext': await handleBirthdayNext(interaction); break;
+      case 'birthdaylist': await handleBirthdayList(interaction); break;
       default: await safeEdit(interaction, 'Unknown command.'); break;
     }
   } catch (error) {

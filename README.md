@@ -1,43 +1,47 @@
-# GT Role Bot V7.4
+# GT Role Bot V7.7
 
-GT utility bot for Discord.
+Render/GitHub-ready Discord utility bot for GT.
 
-## Features
+## New in V7.7
 
-- Give role from channel
-- Take role from channel
-- Earnings role updates
-- Pre-cup signup check with Twitch links or DC proof
-- Post-cup Twitch/VOD proof check
-- Voice channel create/delete/delete all
-- Event bans with automatic expiry and log channel
-- Fortnite ICS calendar commands and automatic morning posts
-- Twitch live notifications
+Twitch live notification watches are now saved in PostgreSQL when `DATABASE_URL` is set.
 
-## Required Render environment variables
+This fixes the issue where the bot loses Twitch watch data after Render redeploys or restarts.
+
+The bot now uses the database for:
+
+- Birthdays
+- Twitch live notification watchlist
+
+## Required Render env
 
 ```env
-TOKEN=your_discord_bot_token
-CLIENT_ID=your_discord_application_id
-GUILD_ID=your_discord_server_id
-TWITCH_CLIENT_ID=your_twitch_client_id
-TWITCH_CLIENT_SECRET=your_twitch_client_secret
+TOKEN=
+CLIENT_ID=
+GUILD_ID=
+TWITCH_CLIENT_ID=
+TWITCH_CLIENT_SECRET=
+FORTNITE_CALENDAR_ICS_URL=
+BIRTHDAY_CHANNEL_ID=
+DATABASE_URL=
+DATABASE_SSL=true
 ```
 
 Optional:
 
 ```env
-FORTNITE_CALENDAR_ICS_URL=your_ics_url
+TWITCH_NOTIFY_INTERVAL_SECONDS=60
 AUTO_FORTNITE_EVENTS_ENABLED=true
-AUTO_FORTNITE_EVENTS_CHANNEL_ID=your_channel_id
+AUTO_FORTNITE_EVENTS_CHANNEL_ID=
 AUTO_FORTNITE_EVENTS_TIME=09:00
 AUTO_FORTNITE_EVENTS_TIMEZONE=Europe/Berlin
 AUTO_FORTNITE_EVENTS_REGION=ALL
 AUTO_FORTNITE_EVENTS_DAYS=1
-TWITCH_NOTIFY_INTERVAL_SECONDS=60
 ```
 
-## Twitch live notification commands
+## Twitch live notifications
+
+Commands:
 
 ```txt
 /twitchwatchadd username:fiebchen channel:#live-now
@@ -45,26 +49,37 @@ TWITCH_NOTIFY_INTERVAL_SECONDS=60
 /twitchwatchlist
 ```
 
-The bot checks watched Twitch channels every 60 seconds by default. It posts only when a watched channel changes from offline to live or starts a new stream.
+After V7.7, watches stay saved after redeploys as long as `DATABASE_URL` is configured.
 
-You can also configure permanent watchers in `config.json`:
+If your old watches were stored only in Render's temporary `twitchWatch.json`, they may need to be added once again with `/twitchwatchadd`.
+After that, they stay in the database.
 
-```json
-"twitchLiveNotifications": {
-  "intervalSeconds": 60,
-  "watchers": [
-    { "username": "fiebchen", "channelId": "DISCORD_CHANNEL_ID" }
-  ]
-}
-```
+## Birthday system
 
-## Deploy
-
-1. Replace the files in GitHub.
-2. Commit changes.
-3. Render → Manual Deploy → Clear build cache & deploy.
-4. Log should show:
+Players can save their own birthday:
 
 ```txt
-GT ROLE BOT V7.4 LOADED
+/birthdayset day:24 month:6 year:1999 timezone:Europe/Berlin reminder_time:09:00
+```
+
+The year is optional.
+
+## Existing features
+
+- Role from channel
+- Take role from channel
+- Earnings role updates
+- Pre-cup sign-in vs Twitch/DC proof check
+- Post-cup Twitch/VOD proof check
+- Voice channel create/delete/delete all
+- Event bans with auto-remove and logs
+- Fortnite ICS calendar + grouped auto posts
+- Twitch live notifications
+- Birthday reminders with timezone support
+
+## Start
+
+```bash
+npm install
+npm start
 ```
