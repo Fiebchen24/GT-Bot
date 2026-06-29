@@ -1,84 +1,96 @@
-# GT Role Bot V7.7
+# GT Role Bot V8.0
 
-Render/GitHub-ready Discord utility bot for GT.
+GitHub + Render ready.
 
-## New in V7.7
+## Enthalten
 
-Twitch live notification watches are now saved in local JSON files when `DATABASE_URL` is set.
-
-This fixes the issue where the bot loses Twitch watch data after Render redeploys or restarts.
-
-The bot now uses the database for:
-
+- Role commands
+  - `/giverolefromchannel`
+  - `/takerolefromchannel`
+  - `/earningsroles`
+- Cup checks
+  - `/checksignup`
+  - `/postcupcheck`
+- Voice channel commands
+  - `/voicechannelcreate`
+  - `/voicechanneldelete`
+  - `/voicechanneldeleteall`
+- Event bans
+  - `/eventbanadd`
+  - `/eventbanfromchannel`
+  - `/eventbanremove`
+  - `/eventbanlist`
+- Fortnite ICS calendar
+  - `/fortniteevents`
+  - `/fortniteeventstoday`
+  - `/fortniteeventspost`
+  - `/fortniteeventsgrouped`
+  - Auto morning post via config/env
+- Twitch live notifications
+  - `/twitchwatchadd`
+  - `/twitchwatchremove`
+  - `/twitchwatchlist`
 - Birthdays
-- Twitch live notification watchlist
+  - `/birthdayset`
+  - `/birthdayremove`
+  - `/birthdaynext`
+  - `/birthdaylist`
+- GT Player Cards
+  - `/playercreate`
+  - `/playeredit`
+  - `/playerdelete`
+  - `/playerpost`
+  - `/playerlist`
+  - fixed GT IDs like `GT-001`
+  - social buttons for Twitch, TikTok, X and YouTube
+  - directory channel via `PLAYER_DIRECTORY_CHANNEL_ID`
 
-## Required Render env
+## Render Environment Variables
+
+Required:
 
 ```env
-TOKEN=
-CLIENT_ID=
-GUILD_ID=
-TWITCH_CLIENT_ID=
-TWITCH_CLIENT_SECRET=
-FORTNITE_CALENDAR_ICS_URL=
-BIRTHDAY_CHANNEL_ID=
-DATABASE_URL=
+TOKEN=your_discord_bot_token
+CLIENT_ID=your_discord_application_id
+GUILD_ID=your_discord_server_id
 ```
 
-Optional:
+Recommended:
 
 ```env
-TWITCH_NOTIFY_INTERVAL_SECONDS=60
+DATABASE_URL=your_postgres_url
+DATABASE_SSL=true
+BIRTHDAY_CHANNEL_ID=your_birthday_channel_id
+PLAYER_DIRECTORY_CHANNEL_ID=your_player_directory_channel_id
+TWITCH_CLIENT_ID=your_twitch_client_id
+TWITCH_CLIENT_SECRET=your_twitch_client_secret
+FORTNITE_CALENDAR_ICS_URL=your_ics_url
 AUTO_FORTNITE_EVENTS_ENABLED=true
-AUTO_FORTNITE_EVENTS_CHANNEL_ID=
+AUTO_FORTNITE_EVENTS_CHANNEL_ID=your_calendar_channel_id
 AUTO_FORTNITE_EVENTS_TIME=09:00
 AUTO_FORTNITE_EVENTS_TIMEZONE=Europe/Berlin
 AUTO_FORTNITE_EVENTS_REGION=ALL
 AUTO_FORTNITE_EVENTS_DAYS=1
 ```
 
-## Twitch live notifications
+## PostgreSQL Tables
 
-Commands:
+The bot creates these tables automatically:
+
+- `gt_birthdays`
+- `gt_twitch_watchers`
+- `gt_players`
+
+If `DATABASE_URL` is missing, the bot falls back to local JSON files where possible. On Render this is not permanent after rebuilds, so PostgreSQL is recommended.
+
+## Deploy
+
+1. Replace files in GitHub.
+2. Do not upload `.env`.
+3. Commit.
+4. Render -> Manual Deploy -> Clear build cache & deploy.
+5. Log should show:
 
 ```txt
-/twitchwatchadd username:fiebchen channel:#live-now
-/twitchwatchremove username:fiebchen
-/twitchwatchlist
-```
-
-After V7.7, watches stay saved after redeploys as long as `DATABASE_URL` is configured.
-
-If your old watches were stored only in Render's temporary `twitchWatch.json`, they may need to be added once again with `/twitchwatchadd`.
-After that, they stay in the database.
-
-## Birthday system
-
-Players can save their own birthday:
-
-```txt
-/birthdayset day:24 month:6 year:1999 timezone:Europe/Berlin reminder_time:09:00
-```
-
-The year is optional.
-
-## Existing features
-
-- Role from channel
-- Take role from channel
-- Earnings role updates
-- Pre-cup sign-in vs Twitch/DC proof check
-- Post-cup Twitch/VOD proof check
-- Voice channel create/delete/delete all
-- Event bans with auto-remove and logs
-- Fortnite ICS calendar + grouped auto posts
-- Twitch live notifications
-- Birthday reminders with timezone support
-
-## Start
-
-```bash
-npm install
-npm start
+GT ROLE BOT V8.0 LOADED
 ```
