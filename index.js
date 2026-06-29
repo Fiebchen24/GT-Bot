@@ -3,6 +3,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
+const { createCanvas, loadImage } = require('@napi-rs/canvas');
 
 const {
   Client,
@@ -14,8 +15,9 @@ const {
   ChannelType,
   MessageFlags,
   EmbedBuilder,
-  ButtonBuilder,
+  AttachmentBuilder,
   ActionRowBuilder,
+  ButtonBuilder,
   ButtonStyle
 } = require('discord.js');
 
@@ -211,71 +213,90 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('playercreate')
-    .setDescription('Create or update a GT player card.')
+    .setDescription('Staff: create a GT Player Card v2.')
     .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
-    .addStringOption(o => o.setName('ign').setDescription('Player name / IGN').setRequired(true))
-    .addStringOption(o => o.setName('roster').setDescription('GT roster').setRequired(true)
-      .addChoices(
-        { name: 'GT Member', value: 'GT Member' },
-        { name: 'GT Academy', value: 'GT Academy' },
-        { name: 'GT Pro', value: 'GT Pro' },
-        { name: 'GT Queens Comp', value: 'GT Queens Comp' },
-        { name: 'Creator', value: 'Creator' }
-      ))
-    .addStringOption(o => o.setName('country').setDescription('Country, e.g. Germany').setRequired(false))
-    .addStringOption(o => o.setName('mode').setDescription('Mode, e.g. Zero Build').setRequired(false))
-    .addStringOption(o => o.setName('role').setDescription('Role, e.g. IGL / Fragger / Support').setRequired(false))
-    .addStringOption(o => o.setName('earnings').setDescription('Earnings, e.g. $500').setRequired(false))
-    .addStringOption(o => o.setName('placement').setDescription('Best placement / achievement').setRequired(false))
-    .addStringOption(o => o.setName('twitch').setDescription('Twitch URL').setRequired(false))
-    .addStringOption(o => o.setName('tiktok').setDescription('TikTok URL').setRequired(false))
-    .addStringOption(o => o.setName('x').setDescription('X / Twitter URL').setRequired(false))
-    .addStringOption(o => o.setName('youtube').setDescription('YouTube URL').setRequired(false))
-    .addStringOption(o => o.setName('quote').setDescription('Short player quote').setRequired(false))
-    .addStringOption(o => o.setName('image').setDescription('Image URL for the card').setRequired(false))
+    .addStringOption(o => o.setName('display_name').setDescription('Name shown on the card').setRequired(true))
+    .addStringOption(o => o.setName('roster').setDescription('GT roster/design').setRequired(true).addChoices(
+      { name: 'GT Member', value: 'GT Member' },
+      { name: 'GT Queens', value: 'GT Queens' },
+      { name: 'GT Comp Queens', value: 'GT Comp Queens' },
+      { name: 'GT Rising Talents', value: 'GT Rising Talents' },
+      { name: 'GT Ranked', value: 'GT Ranked' },
+      { name: 'GT Content Creator', value: 'GT Content Creator' },
+      { name: 'GT Academy Comp', value: 'GT Academy Comp' },
+      { name: 'GT Pro Comp', value: 'GT Pro Comp' },
+      { name: 'GT eSports', value: 'GT eSports' },
+      { name: 'GT Moderator', value: 'GT Moderator' },
+      { name: 'GT Admin', value: 'GT Admin' },
+      { name: 'GT Executive Director', value: 'GT Executive Director' },
+      { name: 'GT Coowner', value: 'GT Coowner' },
+      { name: 'GT Owner', value: 'GT Owner' }
+    ))
+    .addStringOption(o => o.setName('country').setDescription('Country code, e.g. DE, FR, NL'))
+    .addStringOption(o => o.setName('region').setDescription('Region, e.g. EU, NAC, ME'))
+    .addIntegerOption(o => o.setName('earnings').setDescription('Earnings as number, e.g. 12500').setMinValue(0))
+    .addIntegerOption(o => o.setName('pr').setDescription('PR as number').setMinValue(0))
+    .addStringOption(o => o.setName('twitch').setDescription('Twitch username or link'))
+    .addStringOption(o => o.setName('tiktok').setDescription('TikTok username or link'))
+    .addStringOption(o => o.setName('x').setDescription('X/Twitter username or link'))
+    .addStringOption(o => o.setName('youtube').setDescription('YouTube channel/link'))
+    .addStringOption(o => o.setName('tagline').setDescription('Short tagline, max 120 characters'))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
   new SlashCommandBuilder()
     .setName('playeredit')
-    .setDescription('Edit an existing GT player card. Only filled fields are changed.')
+    .setDescription('Staff: edit a GT Player Card v2.')
     .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
-    .addStringOption(o => o.setName('ign').setDescription('Player name / IGN').setRequired(false))
-    .addStringOption(o => o.setName('roster').setDescription('GT roster').setRequired(false)
-      .addChoices(
-        { name: 'GT Member', value: 'GT Member' },
-        { name: 'GT Academy', value: 'GT Academy' },
-        { name: 'GT Pro', value: 'GT Pro' },
-        { name: 'GT Queens Comp', value: 'GT Queens Comp' },
-        { name: 'Creator', value: 'Creator' }
-      ))
-    .addStringOption(o => o.setName('country').setDescription('Country').setRequired(false))
-    .addStringOption(o => o.setName('mode').setDescription('Mode').setRequired(false))
-    .addStringOption(o => o.setName('role').setDescription('Role').setRequired(false))
-    .addStringOption(o => o.setName('earnings').setDescription('Earnings').setRequired(false))
-    .addStringOption(o => o.setName('placement').setDescription('Best placement / achievement').setRequired(false))
-    .addStringOption(o => o.setName('twitch').setDescription('Twitch URL').setRequired(false))
-    .addStringOption(o => o.setName('tiktok').setDescription('TikTok URL').setRequired(false))
-    .addStringOption(o => o.setName('x').setDescription('X / Twitter URL').setRequired(false))
-    .addStringOption(o => o.setName('youtube').setDescription('YouTube URL').setRequired(false))
-    .addStringOption(o => o.setName('quote').setDescription('Short player quote').setRequired(false))
-    .addStringOption(o => o.setName('image').setDescription('Image URL').setRequired(false))
+    .addStringOption(o => o.setName('display_name').setDescription('Name shown on the card'))
+    .addStringOption(o => o.setName('roster').setDescription('GT roster/design').addChoices(
+      { name: 'GT Member', value: 'GT Member' },
+      { name: 'GT Queens', value: 'GT Queens' },
+      { name: 'GT Comp Queens', value: 'GT Comp Queens' },
+      { name: 'GT Rising Talents', value: 'GT Rising Talents' },
+      { name: 'GT Ranked', value: 'GT Ranked' },
+      { name: 'GT Content Creator', value: 'GT Content Creator' },
+      { name: 'GT Academy Comp', value: 'GT Academy Comp' },
+      { name: 'GT Pro Comp', value: 'GT Pro Comp' },
+      { name: 'GT eSports', value: 'GT eSports' },
+      { name: 'GT Moderator', value: 'GT Moderator' },
+      { name: 'GT Admin', value: 'GT Admin' },
+      { name: 'GT Executive Director', value: 'GT Executive Director' },
+      { name: 'GT Coowner', value: 'GT Coowner' },
+      { name: 'GT Owner', value: 'GT Owner' }
+    ))
+    .addStringOption(o => o.setName('country').setDescription('Country code, e.g. DE, FR, NL'))
+    .addStringOption(o => o.setName('region').setDescription('Region, e.g. EU, NAC, ME'))
+    .addIntegerOption(o => o.setName('earnings').setDescription('Earnings as number').setMinValue(0))
+    .addIntegerOption(o => o.setName('pr').setDescription('PR as number').setMinValue(0))
+    .addStringOption(o => o.setName('twitch').setDescription('Twitch username or link'))
+    .addStringOption(o => o.setName('tiktok').setDescription('TikTok username or link'))
+    .addStringOption(o => o.setName('x').setDescription('X/Twitter username or link'))
+    .addStringOption(o => o.setName('youtube').setDescription('YouTube channel/link'))
+    .addStringOption(o => o.setName('tagline').setDescription('Short tagline, max 120 characters'))
+    .addStringOption(o => o.setName('status').setDescription('active or inactive').addChoices({ name: 'active', value: 'active' }, { name: 'inactive', value: 'inactive' }))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
   new SlashCommandBuilder()
     .setName('playerdelete')
-    .setDescription('Delete a GT player card.')
+    .setDescription('Staff: deactivate a GT Player Card. GT-ID stays reserved.')
     .addUserOption(o => o.setName('user').setDescription('Discord user').setRequired(true))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
   new SlashCommandBuilder()
+    .setName('playercard')
+    .setDescription('Preview a GT Player Card v2.')
+    .addUserOption(o => o.setName('user').setDescription('User to show. Empty = yourself')),
+
+  new SlashCommandBuilder()
     .setName('playerpost')
-    .setDescription('Post or update GT player card(s) in the player directory channel.')
-    .addUserOption(o => o.setName('user').setDescription('Optional: only post/update this player').setRequired(false))
+    .setDescription('Staff: post a GT Player Card v2 into the player directory.')
+    .addUserOption(o => o.setName('user').setDescription('Player').setRequired(true))
+    .addChannelOption(o => o.setName('channel').setDescription('Optional channel. Empty = PLAYER_DIRECTORY_CHANNEL_ID').addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
   new SlashCommandBuilder()
     .setName('playerlist')
-    .setDescription('List saved GT player cards.')
+    .setDescription('Staff: list saved GT Player Cards.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
 
 ].map(c => c.toJSON());
@@ -1914,354 +1935,521 @@ async function handleBirthdayList(interaction) {
 }
 
 
+const PLAYER_CARDS_FILE = path.join(__dirname, 'playerCards.json');
+const PLAYER_CARD_BG_PATH = path.join(__dirname, 'assets', 'cards', 'backgrounds', 'player-card-bg.png');
 
-const PLAYERS_FILE = path.join(__dirname, 'data', 'gtPlayers.json');
+const ROSTER_STYLES = {
+  'GT Member': { primary: '#8B5CF6', secondary: '#22D3EE', label: 'GT MEMBER' },
+  'GT Queens': { primary: '#F472B6', secondary: '#A855F7', label: 'GT QUEENS' },
+  'GT Comp Queens': { primary: '#EC4899', secondary: '#FFFFFF', label: 'GT COMP QUEENS' },
+  'GT Rising Talents': { primary: '#2DD4BF', secondary: '#EF4444', label: 'GT RISING TALENTS' },
+  'GT Ranked': { primary: '#D8A0A6', secondary: '#8B5CF6', label: 'GT RANKED' },
+  'GT Content Creator': { primary: '#A855F7', secondary: '#FFFFFF', label: 'GT CONTENT CREATOR' },
+  'GT Academy Comp': { primary: '#EF4444', secondary: '#FACC15', label: 'GT ACADEMY COMP' },
+  'GT Pro Comp': { primary: '#8B5CF6', secondary: '#FB923C', label: 'GT PRO COMP' },
+  'GT eSports': { primary: '#FACC15', secondary: '#14532D', label: 'GT ESPORTS' },
+  'GT Moderator': { primary: '#EF4444', secondary: '#EC4899', label: 'GT MODERATOR' },
+  'GT Admin': { primary: '#FB923C', secondary: '#FDBA74', label: 'GT ADMIN' },
+  'GT Executive Director': { primary: '#EC4899', secondary: '#22D3EE', label: 'GT EXECUTIVE DIRECTOR' },
+  'GT Coowner': { primary: '#FDA4AF', secondary: '#F472B6', label: 'GT COOWNER' },
+  'GT Owner': { primary: '#DC2626', secondary: '#050505', label: 'GT OWNER' }
+};
 
-async function initPlayerDatabase() {
+function getRosterStyle(roster) {
+  return ROSTER_STYLES[roster] || ROSTER_STYLES['GT Member'];
+}
+
+async function initPlayerCardDatabase() {
   if (!birthdayPool) {
-    console.log('Player card storage: gtPlayers.json local file mode.');
+    console.log('Player card storage: playerCards.json local file mode.');
     return;
   }
 
   await birthdayPool.query(`
-    CREATE TABLE IF NOT EXISTS gt_players (
+    CREATE TABLE IF NOT EXISTS gt_player_cards (
       guild_id TEXT NOT NULL,
-      discord_id TEXT NOT NULL,
-      gt_id TEXT NOT NULL,
-      ign TEXT NOT NULL,
-      roster TEXT NOT NULL,
-      country TEXT DEFAULT '',
-      mode TEXT DEFAULT '',
-      player_role TEXT DEFAULT '',
-      earnings TEXT DEFAULT '',
-      placement TEXT DEFAULT '',
-      twitch TEXT DEFAULT '',
-      tiktok TEXT DEFAULT '',
-      x_url TEXT DEFAULT '',
-      youtube TEXT DEFAULT '',
-      quote TEXT DEFAULT '',
-      image TEXT DEFAULT '',
-      channel_id TEXT DEFAULT '',
-      message_id TEXT DEFAULT '',
-      created_by TEXT DEFAULT '',
-      updated_by TEXT DEFAULT '',
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW(),
-      PRIMARY KEY (guild_id, discord_id),
-      UNIQUE (guild_id, gt_id)
+      user_id TEXT NOT NULL,
+      gt_id_number INTEGER,
+      gt_id TEXT,
+      discord_username TEXT,
+      display_name TEXT,
+      roster TEXT,
+      country_code TEXT,
+      region TEXT,
+      earnings INTEGER DEFAULT 0,
+      pr INTEGER DEFAULT 0,
+      twitch TEXT,
+      tiktok TEXT,
+      youtube TEXT,
+      x TEXT,
+      tagline TEXT,
+      status TEXT DEFAULT 'active',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (guild_id, user_id)
     );
   `);
+
+  const alters = [
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS gt_id_number INTEGER`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS gt_id TEXT`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS discord_username TEXT`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS country_code TEXT`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS earnings INTEGER DEFAULT 0`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS pr INTEGER DEFAULT 0`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS tagline TEXT`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`
+  ];
+  for (const q of alters) await birthdayPool.query(q).catch(() => {});
 
   console.log('Player card storage: PostgreSQL database connected.');
 }
 
-function loadJsonFile(file, fallback) {
-  ensureDataDir();
+function loadPlayerCardStore() {
   try {
-    if (!fs.existsSync(file)) return fallback;
-    return JSON.parse(fs.readFileSync(file, 'utf8')) || fallback;
+    if (!fs.existsSync(PLAYER_CARDS_FILE)) return { cards: [] };
+    const parsed = JSON.parse(fs.readFileSync(PLAYER_CARDS_FILE, 'utf8'));
+    return { cards: Array.isArray(parsed.cards) ? parsed.cards : [] };
   } catch (error) {
-    console.error(`Could not load ${path.basename(file)}:`, error.message);
-    return fallback;
+    console.error('Could not load playerCards.json:', error.message);
+    return { cards: [] };
   }
 }
 
-function saveJsonFile(file, data) {
-  ensureDataDir();
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+function savePlayerCardStore(store) {
+  fs.writeFileSync(PLAYER_CARDS_FILE, JSON.stringify(store, null, 2));
 }
 
-function cleanOptional(value) {
-  if (value === undefined || value === null) return '';
-  return String(value).trim();
+function formatGtId(number) {
+  return `GT-${String(number).padStart(3, '0')}`;
 }
 
-function validUrl(url) {
-  if (!url) return false;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch (_) {
-    return false;
+async function nextGtIdNumber(guildId) {
+  if (birthdayPool) {
+    const result = await birthdayPool.query('SELECT COALESCE(MAX(gt_id_number), 0) + 1 AS next FROM gt_player_cards WHERE guild_id = $1', [guildId]);
+    return Number(result.rows[0]?.next || 1);
   }
+  const store = loadPlayerCardStore();
+  const max = store.cards.filter(c => c.guildId === guildId).reduce((m, c) => Math.max(m, Number(c.gtIdNumber || 0)), 0);
+  return max + 1;
 }
 
-function rosterEmoji(roster) {
-  const value = String(roster || '').toLowerCase();
-  if (value.includes('pro')) return '👑';
-  if (value.includes('academy')) return '⭐';
-  if (value.includes('queen')) return '👸';
-  if (value.includes('creator')) return '🎥';
-  return '💛';
-}
-
-function playerSortValue(player) {
-  const order = { 'GT Pro': 1, 'GT Queens Comp': 2, 'GT Academy': 3, 'GT Member': 4, 'Creator': 5 };
-  return `${order[player.roster] || 99}-${String(player.ign || '').toLowerCase()}`;
-}
-
-function getPlayerDirectoryChannelId() {
-  return process.env.PLAYER_DIRECTORY_CHANNEL_ID || config.playerDirectoryChannelId || '';
-}
-
-async function getPlayerDirectoryChannel(guild) {
-  const channelId = getPlayerDirectoryChannelId();
-  if (!channelId) return null;
-  return guild.channels.fetch(channelId).catch(() => null);
-}
-
-function normalizePlayerRow(row) {
-  if (!row) return null;
+function rowToPlayerCard(row) {
   return {
-    discordId: row.discord_id || row.discordId,
-    gtId: row.gt_id || row.gtId,
-    ign: row.ign || '',
-    roster: row.roster || '',
-    country: row.country || '',
-    mode: row.mode || '',
-    role: row.player_role || row.role || '',
-    earnings: row.earnings || '',
-    placement: row.placement || '',
+    guildId: row.guild_id,
+    userId: row.user_id,
+    gtIdNumber: row.gt_id_number || null,
+    gtId: row.gt_id || (row.gt_id_number ? formatGtId(row.gt_id_number) : ''),
+    discordUsername: row.discord_username || '',
+    displayName: row.display_name || '',
+    roster: row.roster || 'GT Member',
+    countryCode: row.country_code || '',
+    region: row.region || '',
+    earnings: Number(row.earnings || 0),
+    pr: Number(row.pr || 0),
     twitch: row.twitch || '',
     tiktok: row.tiktok || '',
-    x: row.x_url || row.x || '',
     youtube: row.youtube || '',
-    quote: row.quote || '',
-    image: row.image || '',
-    channelId: row.channel_id || row.channelId || '',
-    messageId: row.message_id || row.messageId || ''
+    x: row.x || '',
+    tagline: row.tagline || '',
+    status: row.status || 'active',
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null
   };
 }
 
-async function getNextGtId(guildId) {
-  if (!birthdayPool) {
-    const store = loadJsonFile(PLAYERS_FILE, { nextId: 1, players: {} });
-    const gtId = `GT-${String(store.nextId || 1).padStart(3, '0')}`;
-    store.nextId = (store.nextId || 1) + 1;
-    saveJsonFile(PLAYERS_FILE, store);
-    return gtId;
+function cleanOptionalText(value, max = 100) {
+  const text = String(value || '').trim();
+  return text.length > max ? text.slice(0, max) : text;
+}
+
+function cleanSocial(value) {
+  return cleanOptionalText(value, 180).replace(/^@/, '');
+}
+
+function buildSocialUrl(type, value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const handle = raw.replace(/^@/, '');
+  if (type === 'twitch') return `https://twitch.tv/${handle.replace(/^.*twitch\.tv\//i, '')}`;
+  if (type === 'tiktok') return `https://tiktok.com/@${handle.replace(/^.*@/, '')}`;
+  if (type === 'youtube') return /^@/.test(raw) ? `https://youtube.com/${raw}` : `https://youtube.com/${handle}`;
+  if (type === 'x') return `https://x.com/${handle}`;
+  return raw;
+}
+
+function socialHandle(value) {
+  if (!value) return '';
+  return String(value)
+    .replace(/^https?:\/\/(www\.)?/i, '')
+    .replace(/^twitch\.tv\//i, '')
+    .replace(/^tiktok\.com\/@?/i, '')
+    .replace(/^x\.com\//i, '')
+    .replace(/^twitter\.com\//i, '')
+    .replace(/^youtube\.com\/@?/i, '')
+    .replace(/\/$/, '')
+    .replace(/^@/, '');
+}
+
+function countryFlag(code) {
+  const cc = String(code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(cc)) return '';
+  return cc.split('').map(ch => String.fromCodePoint(127397 + ch.charCodeAt(0))).join('');
+}
+
+function formatMoney(value) {
+  const n = Number(value || 0);
+  if (!n) return '$0';
+  return `$${n.toLocaleString('en-US')}`;
+}
+
+async function getPlayerCards(guildId = null, includeInactive = true) {
+  if (birthdayPool) {
+    let result;
+    if (guildId) {
+      result = await birthdayPool.query('SELECT * FROM gt_player_cards WHERE guild_id = $1 ORDER BY gt_id_number NULLS LAST, display_name NULLS LAST', [guildId]);
+    } else {
+      result = await birthdayPool.query('SELECT * FROM gt_player_cards ORDER BY guild_id, gt_id_number NULLS LAST, display_name NULLS LAST');
+    }
+    const cards = result.rows.map(rowToPlayerCard);
+    return includeInactive ? cards : cards.filter(c => c.status !== 'inactive');
   }
 
-  const result = await birthdayPool.query(`
-    SELECT COALESCE(MAX(CAST(SUBSTRING(gt_id FROM 4) AS INT)), 0) + 1 AS next_id
-    FROM gt_players
-    WHERE guild_id = $1 AND gt_id ~ '^GT-[0-9]+$'
-  `, [guildId]);
-  return `GT-${String(result.rows[0].next_id || 1).padStart(3, '0')}`;
+  const store = loadPlayerCardStore();
+  const cards = guildId ? store.cards.filter(c => c.guildId === guildId) : store.cards;
+  return includeInactive ? cards : cards.filter(c => c.status !== 'inactive');
 }
 
-async function getPlayer(guildId, discordId) {
-  if (!birthdayPool) {
-    const store = loadJsonFile(PLAYERS_FILE, { nextId: 1, players: {} });
-    return store.players[discordId] || null;
-  }
-  const result = await birthdayPool.query('SELECT * FROM gt_players WHERE guild_id=$1 AND discord_id=$2', [guildId, discordId]);
-  return normalizePlayerRow(result.rows[0]);
-}
-
-async function listPlayers(guildId) {
-  if (!birthdayPool) {
-    const store = loadJsonFile(PLAYERS_FILE, { nextId: 1, players: {} });
-    return Object.values(store.players || {}).sort((a,b) => playerSortValue(a).localeCompare(playerSortValue(b)));
-  }
-  const result = await birthdayPool.query('SELECT * FROM gt_players WHERE guild_id=$1 ORDER BY roster, ign', [guildId]);
-  return result.rows.map(normalizePlayerRow).sort((a,b) => playerSortValue(a).localeCompare(playerSortValue(b)));
-}
-
-async function savePlayer(guildId, userId, player) {
-  if (!birthdayPool) {
-    const store = loadJsonFile(PLAYERS_FILE, { nextId: 1, players: {} });
-    store.players[userId] = player;
-    saveJsonFile(PLAYERS_FILE, store);
-    return player;
+async function getPlayerCard(guildId, userId) {
+  if (birthdayPool) {
+    const result = await birthdayPool.query('SELECT * FROM gt_player_cards WHERE guild_id = $1 AND user_id = $2', [guildId, userId]);
+    return result.rows[0] ? rowToPlayerCard(result.rows[0]) : null;
   }
 
-  await birthdayPool.query(`
-    INSERT INTO gt_players
-      (guild_id, discord_id, gt_id, ign, roster, country, mode, player_role, earnings, placement, twitch, tiktok, x_url, youtube, quote, image, channel_id, message_id, created_by, updated_by, updated_at)
-    VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW())
-    ON CONFLICT (guild_id, discord_id) DO UPDATE SET
-      ign=EXCLUDED.ign, roster=EXCLUDED.roster, country=EXCLUDED.country, mode=EXCLUDED.mode, player_role=EXCLUDED.player_role,
-      earnings=EXCLUDED.earnings, placement=EXCLUDED.placement, twitch=EXCLUDED.twitch, tiktok=EXCLUDED.tiktok, x_url=EXCLUDED.x_url,
-      youtube=EXCLUDED.youtube, quote=EXCLUDED.quote, image=EXCLUDED.image, channel_id=EXCLUDED.channel_id, message_id=EXCLUDED.message_id,
-      updated_by=EXCLUDED.updated_by, updated_at=NOW()
-  `, [guildId, userId, player.gtId, player.ign, player.roster, player.country, player.mode, player.role, player.earnings, player.placement, player.twitch, player.tiktok, player.x, player.youtube, player.quote, player.image, player.channelId || '', player.messageId || '', player.createdBy || '', player.updatedBy || '']);
-  return player;
+  const store = loadPlayerCardStore();
+  return store.cards.find(c => c.guildId === guildId && c.userId === userId) || null;
 }
 
-async function deletePlayer(guildId, userId) {
-  const player = await getPlayer(guildId, userId);
-  if (!player) return null;
-  if (birthdayPool) await birthdayPool.query('DELETE FROM gt_players WHERE guild_id=$1 AND discord_id=$2', [guildId, userId]);
-  else {
-    const store = loadJsonFile(PLAYERS_FILE, { nextId: 1, players: {} });
-    delete store.players[userId];
-    saveJsonFile(PLAYERS_FILE, store);
+async function upsertPlayerCard(record, mode = 'create') {
+  let existing = await getPlayerCard(record.guildId, record.userId);
+  let gtIdNumber = existing?.gtIdNumber || null;
+  let gtId = existing?.gtId || '';
+  if (!existing) {
+    gtIdNumber = await nextGtIdNumber(record.guildId);
+    gtId = formatGtId(gtIdNumber);
   }
-  return player;
+
+  const merged = {
+    ...existing,
+    ...record,
+    gtIdNumber,
+    gtId,
+    status: record.status || existing?.status || 'active'
+  };
+
+  if (birthdayPool) {
+    await birthdayPool.query(
+      `INSERT INTO gt_player_cards (guild_id, user_id, gt_id_number, gt_id, discord_username, display_name, roster, country_code, region, earnings, pr, twitch, tiktok, youtube, x, tagline, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())
+       ON CONFLICT (guild_id, user_id)
+       DO UPDATE SET
+         discord_username = COALESCE(NULLIF(EXCLUDED.discord_username, ''), gt_player_cards.discord_username),
+         display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), gt_player_cards.display_name),
+         roster = COALESCE(NULLIF(EXCLUDED.roster, ''), gt_player_cards.roster),
+         country_code = COALESCE(NULLIF(EXCLUDED.country_code, ''), gt_player_cards.country_code),
+         region = COALESCE(NULLIF(EXCLUDED.region, ''), gt_player_cards.region),
+         earnings = COALESCE(EXCLUDED.earnings, gt_player_cards.earnings),
+         pr = COALESCE(EXCLUDED.pr, gt_player_cards.pr),
+         twitch = COALESCE(NULLIF(EXCLUDED.twitch, ''), gt_player_cards.twitch),
+         tiktok = COALESCE(NULLIF(EXCLUDED.tiktok, ''), gt_player_cards.tiktok),
+         youtube = COALESCE(NULLIF(EXCLUDED.youtube, ''), gt_player_cards.youtube),
+         x = COALESCE(NULLIF(EXCLUDED.x, ''), gt_player_cards.x),
+         tagline = COALESCE(NULLIF(EXCLUDED.tagline, ''), gt_player_cards.tagline),
+         status = COALESCE(NULLIF(EXCLUDED.status, ''), gt_player_cards.status),
+         updated_at = NOW()`,
+      [merged.guildId, merged.userId, gtIdNumber, gtId, merged.discordUsername || '', merged.displayName || '', merged.roster || 'GT Member', merged.countryCode || '', merged.region || '', Number.isInteger(merged.earnings) ? merged.earnings : Number(merged.earnings || 0), Number.isInteger(merged.pr) ? merged.pr : Number(merged.pr || 0), merged.twitch || '', merged.tiktok || '', merged.youtube || '', merged.x || '', merged.tagline || '', merged.status || 'active']
+    );
+    return getPlayerCard(record.guildId, record.userId);
+  }
+
+  const store = loadPlayerCardStore();
+  const idx = store.cards.findIndex(c => c.guildId === record.guildId && c.userId === record.userId);
+  const cleaned = { ...merged, updatedAt: new Date().toISOString(), createdAt: existing?.createdAt || new Date().toISOString() };
+  if (idx >= 0) store.cards[idx] = cleaned;
+  else store.cards.push(cleaned);
+  savePlayerCardStore(store);
+  return cleaned;
 }
 
-function buildPlayerCardEmbed(player, member = null) {
-  const avatar = member?.displayAvatarURL?.({ size: 256 }) || null;
-  const socials = [];
-  if (validUrl(player.twitch)) socials.push(`[Twitch](${player.twitch})`);
-  if (validUrl(player.tiktok)) socials.push(`[TikTok](${player.tiktok})`);
-  if (validUrl(player.x)) socials.push(`[X](${player.x})`);
-  if (validUrl(player.youtube)) socials.push(`[YouTube](${player.youtube})`);
-
-  const embed = new EmbedBuilder()
-    .setTitle(`${rosterEmoji(player.roster)} ${player.gtId} • ${player.ign}`)
-    .setDescription(player.quote ? `“${player.quote}”` : 'GT Player Card')
-    .addFields(
-      { name: 'Roster', value: player.roster || 'Not set', inline: true },
-      { name: 'Country', value: player.country || 'Not set', inline: true },
-      { name: 'Mode', value: player.mode || 'Not set', inline: true },
-      { name: 'Role', value: player.role || 'Not set', inline: true },
-      { name: 'Earnings', value: player.earnings || 'Not set', inline: true },
-      { name: 'Best Placement', value: player.placement || 'Not set', inline: false },
-      { name: 'Socials', value: socials.length ? socials.join(' • ') : 'No socials added yet.', inline: false }
-    )
-    .setColor(0xff4fd8)
-    .setFooter({ text: 'GT Player Directory' })
-    .setTimestamp();
-  if (validUrl(player.image)) embed.setImage(player.image);
-  else if (avatar) embed.setThumbnail(avatar);
-  return embed;
+async function deactivatePlayerCard(guildId, userId) {
+  const card = await getPlayerCard(guildId, userId);
+  if (!card) return null;
+  await upsertPlayerCard({ guildId, userId, status: 'inactive' }, 'edit');
+  return card;
 }
 
-function buildPlayerButtons(player) {
+function roundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawPanel(ctx, x, y, w, h, style, alpha = 0.50) {
+  ctx.save();
+  roundedRect(ctx, x, y, w, h, 24);
+  ctx.fillStyle = `rgba(8, 10, 24, ${alpha})`;
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = style.primary;
+  ctx.shadowColor = style.secondary;
+  ctx.shadowBlur = 14;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFittedText(ctx, text, x, y, maxWidth, size, family = 'Arial Black') {
+  let fontSize = size;
+  do {
+    ctx.font = `900 ${fontSize}px ${family}, Arial, sans-serif`;
+    if (ctx.measureText(text).width <= maxWidth) break;
+    fontSize -= 2;
+  } while (fontSize > 24);
+  ctx.fillText(text, x, y);
+}
+
+async function loadImageFromUrl(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+  return loadImage(Buffer.from(await res.arrayBuffer()));
+}
+
+async function renderPlayerCardImage(guild, card) {
+  const width = 1200;
+  const height = 675;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  const style = getRosterStyle(card.roster);
+
+  if (fs.existsSync(PLAYER_CARD_BG_PATH)) {
+    const bg = await loadImage(PLAYER_CARD_BG_PATH);
+    ctx.drawImage(bg, 0, 0, width, height);
+  } else {
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, '#090014');
+    gradient.addColorStop(0.5, '#111827');
+    gradient.addColorStop(1, '#200020');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  // soft roster glow
+  const glow = ctx.createRadialGradient(230, 240, 20, 230, 240, 330);
+  glow.addColorStop(0, `${style.primary}88`);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, width, height);
+
+  drawPanel(ctx, 68, 80, 325, 450, style, 0.42);
+  drawPanel(ctx, 430, 85, 685, 185, style, 0.42);
+  drawPanel(ctx, 430, 295, 325, 165, style, 0.42);
+  drawPanel(ctx, 790, 295, 325, 165, style, 0.42);
+  drawPanel(ctx, 430, 485, 685, 90, style, 0.38);
+
+  const member = await guild.members.fetch(card.userId).catch(() => null);
+  const user = member?.user || await client.users.fetch(card.userId).catch(() => null);
+  const avatarUrl = user?.displayAvatarURL?.({ extension: 'png', size: 512 }) || null;
+
+  if (avatarUrl) {
+    try {
+      const avatar = await loadImageFromUrl(avatarUrl);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(230, 225, 118, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(avatar, 112, 107, 236, 236);
+      ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(230, 225, 123, 0, Math.PI * 2);
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = style.primary;
+      ctx.shadowColor = style.secondary;
+      ctx.shadowBlur = 18;
+      ctx.stroke();
+      ctx.restore();
+    } catch (error) {
+      console.warn('Avatar render failed:', error.message);
+    }
+  }
+
+  // avatar panel text
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '900 42px Arial Black, Arial, sans-serif';
+  ctx.fillText(card.gtId || 'GT-???', 230, 395);
+  ctx.font = '800 24px Arial, sans-serif';
+  ctx.fillStyle = style.secondary;
+  ctx.fillText(style.label, 230, 435);
+
+  // main info
+  const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#FFFFFF';
+  drawFittedText(ctx, name, 465, 155, 610, 56);
+  const flag = countryFlag(card.countryCode);
+  ctx.font = '700 30px Arial, sans-serif';
+  ctx.fillStyle = '#E5E7EB';
+  const infoLine = [flag, card.countryCode?.toUpperCase(), card.region?.toUpperCase()].filter(Boolean).join('  ·  ');
+  ctx.fillText(infoLine || 'GT ESPORTS', 468, 205);
+  if (card.tagline) {
+    ctx.font = '600 24px Arial, sans-serif';
+    ctx.fillStyle = '#D1D5DB';
+    ctx.fillText(card.tagline, 468, 240);
+  }
+
+  // stats
+  ctx.textAlign = 'center';
+  ctx.fillStyle = style.secondary;
+  ctx.font = '800 24px Arial, sans-serif';
+  ctx.fillText('EARNINGS', 592, 345);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '900 44px Arial Black, Arial, sans-serif';
+  ctx.fillText(formatMoney(card.earnings), 592, 405);
+
+  ctx.fillStyle = style.secondary;
+  ctx.font = '800 24px Arial, sans-serif';
+  ctx.fillText('PR', 952, 345);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '900 48px Arial Black, Arial, sans-serif';
+  ctx.fillText(Number(card.pr || 0).toLocaleString('en-US'), 952, 405);
+
+  // socials on card
+  const socials = [
+    card.twitch ? `Twitch: ${socialHandle(card.twitch)}` : '',
+    card.tiktok ? `TikTok: ${socialHandle(card.tiktok)}` : '',
+    card.x ? `X: ${socialHandle(card.x)}` : '',
+    card.youtube ? `YouTube: ${socialHandle(card.youtube)}` : ''
+  ].filter(Boolean);
+  ctx.textAlign = 'left';
+  ctx.font = '700 24px Arial, sans-serif';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillText(socials.length ? socials.slice(0, 2).join('   •   ') : 'GT PLAYER DIRECTORY', 468, 535);
+  if (socials.length > 2) ctx.fillText(socials.slice(2).join('   •   '), 468, 565);
+
+  return canvas.toBuffer('image/png');
+}
+
+function buildSocialButtons(card) {
   const buttons = [];
-  const addButton = (label, emoji, url) => {
-    if (!validUrl(url)) return;
-    buttons.push(new ButtonBuilder().setLabel(label).setEmoji(emoji).setURL(url).setStyle(ButtonStyle.Link));
+  const items = [
+    ['Twitch', 'twitch', card.twitch],
+    ['TikTok', 'tiktok', card.tiktok],
+    ['X', 'x', card.x],
+    ['YouTube', 'youtube', card.youtube]
+  ];
+  for (const [label, type, value] of items) {
+    const url = buildSocialUrl(type, value);
+    if (!url) continue;
+    buttons.push(new ButtonBuilder().setLabel(label).setStyle(ButtonStyle.Link).setURL(url));
+  }
+  if (!buttons.length) return [];
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+  return rows;
+}
+
+async function buildPlayerCardPayload(guild, card) {
+  const png = await renderPlayerCardImage(guild, card);
+  const filename = `${card.gtId || 'GT-CARD'}-${(card.displayName || 'player').replace(/[^a-z0-9_-]/gi, '_')}.png`;
+  const file = new AttachmentBuilder(png, { name: filename });
+  const content = `**${card.gtId || 'GT-???'} · ${card.displayName || 'GT Player'}**\n${getRosterStyle(card.roster).label}${card.status === 'inactive' ? ' · inactive' : ''}`;
+  return { content, files: [file], components: buildSocialButtons(card) };
+}
+
+function makePlayerRecordFromInteraction(interaction, user, mode) {
+  const earnings = interaction.options.getInteger('earnings');
+  const pr = interaction.options.getInteger('pr');
+  return {
+    guildId: interaction.guildId,
+    userId: user.id,
+    discordUsername: user.username || '',
+    displayName: cleanOptionalText(interaction.options.getString('display_name'), 80),
+    roster: cleanOptionalText(interaction.options.getString('roster'), 80),
+    countryCode: cleanOptionalText(interaction.options.getString('country'), 2).toUpperCase(),
+    region: cleanOptionalText(interaction.options.getString('region'), 30).toUpperCase(),
+    earnings: earnings === null ? undefined : earnings,
+    pr: pr === null ? undefined : pr,
+    twitch: cleanSocial(interaction.options.getString('twitch')),
+    tiktok: cleanSocial(interaction.options.getString('tiktok')),
+    youtube: cleanSocial(interaction.options.getString('youtube')),
+    x: cleanSocial(interaction.options.getString('x')),
+    tagline: cleanOptionalText(interaction.options.getString('tagline'), 120),
+    status: cleanOptionalText(interaction.options.getString('status'), 20) || (mode === 'create' ? 'active' : '')
   };
-  addButton('Twitch', '🎥', player.twitch);
-  addButton('TikTok', '🎵', player.tiktok);
-  addButton('X', '🐦', player.x);
-  addButton('YouTube', '▶️', player.youtube);
-  return buttons.length ? [new ActionRowBuilder().addComponents(buttons.slice(0, 5))] : [];
-}
-
-function getPlayerInput(interaction, requireCreate = false) {
-  const get = name => cleanOptional(interaction.options.getString(name));
-  const data = {};
-  for (const field of ['ign', 'roster', 'country', 'mode', 'role', 'earnings', 'placement', 'twitch', 'tiktok', 'x', 'youtube', 'quote', 'image']) {
-    const value = get(field);
-    if (value || requireCreate) data[field] = value;
-  }
-  return data;
-}
-
-async function postOrUpdatePlayerCard(guild, userId) {
-  const player = await getPlayer(guild.id, userId);
-  if (!player) throw new Error('Player card not found.');
-  const channel = await getPlayerDirectoryChannel(guild);
-  if (!channel || !isUsableTextChannel(channel)) throw new Error('Player directory channel not found. Set PLAYER_DIRECTORY_CHANNEL_ID in Render or config.json.');
-  const member = await guild.members.fetch(userId).catch(() => null);
-  const payload = { embeds: [buildPlayerCardEmbed(player, member)], components: buildPlayerButtons(player) };
-  let message = null;
-  if (player.messageId) message = await channel.messages.fetch(player.messageId).catch(() => null);
-  if (message) await message.edit(payload);
-  else {
-    message = await channel.send(payload);
-    player.messageId = message.id;
-    player.channelId = channel.id;
-    await savePlayer(guild.id, userId, player);
-  }
-  return message;
 }
 
 async function handlePlayerCreate(interaction) {
   const user = interaction.options.getUser('user');
-  const input = getPlayerInput(interaction, true);
-  if (!input.ign) throw new Error('IGN is required.');
-  if (!input.roster) throw new Error('Roster is required.');
-  const existing = await getPlayer(interaction.guild.id, user.id);
-  const player = {
-    ...(existing || {}),
-    discordId: user.id,
-    gtId: existing?.gtId || await getNextGtId(interaction.guild.id),
-    ign: input.ign,
-    roster: input.roster,
-    country: input.country || '',
-    mode: input.mode || '',
-    role: input.role || '',
-    earnings: input.earnings || '',
-    placement: input.placement || '',
-    twitch: input.twitch || '',
-    tiktok: input.tiktok || '',
-    x: input.x || '',
-    youtube: input.youtube || '',
-    quote: input.quote || '',
-    image: input.image || '',
-    updatedBy: interaction.user.id,
-    createdBy: existing?.createdBy || interaction.user.id
-  };
-  await savePlayer(interaction.guild.id, user.id, player);
-  let location = '';
-  try {
-    const message = await postOrUpdatePlayerCard(interaction.guild, user.id);
-    location = ` Posted in ${message.channel}.`;
-  } catch (error) {
-    location = ` Saved, but not posted yet: ${error.message}`;
-  }
-  await safeEdit(interaction, `Player card saved for **${player.ign}** (${player.gtId}).${location}`);
+  const existing = await getPlayerCard(interaction.guildId, user.id);
+  if (existing) return safeEdit(interaction, `${user} already has a GT Player Card (${existing.gtId}). Use /playeredit instead.`);
+  const record = makePlayerRecordFromInteraction(interaction, user, 'create');
+  const saved = await upsertPlayerCard(record, 'create');
+  const payload = await buildPlayerCardPayload(interaction.guild, saved);
+  await safeEditPayload(interaction, { content: `Created ${user}'s GT Player Card: **${saved.gtId}**`, files: payload.files, components: payload.components });
 }
 
 async function handlePlayerEdit(interaction) {
   const user = interaction.options.getUser('user');
-  const input = getPlayerInput(interaction, false);
-  const player = await getPlayer(interaction.guild.id, user.id);
-  if (!player) throw new Error('No player card found for this user. Use /playercreate first.');
-  for (const [key, value] of Object.entries(input)) if (value) player[key] = value;
-  player.updatedBy = interaction.user.id;
-  await savePlayer(interaction.guild.id, user.id, player);
-  let location = '';
-  try {
-    const message = await postOrUpdatePlayerCard(interaction.guild, user.id);
-    location = ` Updated in ${message.channel}.`;
-  } catch (error) {
-    location = ` Saved, but not posted: ${error.message}`;
-  }
-  await safeEdit(interaction, `Player card updated for **${player.ign}** (${player.gtId}).${location}`);
+  const existing = await getPlayerCard(interaction.guildId, user.id);
+  if (!existing) return safeEdit(interaction, `${user} does not have a GT Player Card yet. Use /playercreate first.`);
+  const record = makePlayerRecordFromInteraction(interaction, user, 'edit');
+  record.gtIdNumber = existing.gtIdNumber;
+  record.gtId = existing.gtId;
+  const saved = await upsertPlayerCard(record, 'edit');
+  const payload = await buildPlayerCardPayload(interaction.guild, saved);
+  await safeEditPayload(interaction, { content: `Updated ${user}'s GT Player Card: **${saved.gtId}**`, files: payload.files, components: payload.components });
 }
 
 async function handlePlayerDelete(interaction) {
   const user = interaction.options.getUser('user');
-  const player = await getPlayer(interaction.guild.id, user.id);
-  if (!player) return safeEdit(interaction, 'No player card found for this user.');
-  if (player.channelId && player.messageId) {
-    const channel = await interaction.guild.channels.fetch(player.channelId).catch(() => null);
-    const message = await channel?.messages?.fetch(player.messageId).catch(() => null);
-    if (message) await message.delete().catch(() => null);
-  }
-  await deletePlayer(interaction.guild.id, user.id);
-  await safeEdit(interaction, `Player card deleted for **${player.ign}** (${player.gtId}).`);
+  const card = await deactivatePlayerCard(interaction.guildId, user.id);
+  await safeEdit(interaction, card ? `Deactivated ${user}'s GT Player Card. **${card.gtId}** stays reserved.` : `${user} does not have a GT Player Card.`);
+}
+
+async function handlePlayerCard(interaction) {
+  const user = interaction.options.getUser('user') || interaction.user;
+  const card = await getPlayerCard(interaction.guildId, user.id);
+  if (!card) return safeEdit(interaction, user.id === interaction.user.id ? 'You do not have a GT Player Card yet.' : `${user} does not have a GT Player Card yet.`);
+  const payload = await buildPlayerCardPayload(interaction.guild, card);
+  await safeEditPayload(interaction, payload);
 }
 
 async function handlePlayerPost(interaction) {
   const user = interaction.options.getUser('user');
-  if (user) {
-    await postOrUpdatePlayerCard(interaction.guild, user.id);
-    const player = await getPlayer(interaction.guild.id, user.id);
-    return safeEdit(interaction, `Player card posted/updated for **${player.ign}**.`);
-  }
-  const players = await listPlayers(interaction.guild.id);
-  if (!players.length) return safeEdit(interaction, 'No player cards saved yet.');
-  let posted = 0;
-  for (const player of players) {
-    await postOrUpdatePlayerCard(interaction.guild, player.discordId);
-    posted++;
-  }
-  await safeEdit(interaction, `Posted/updated **${posted}** player cards.`);
+  const selected = interaction.options.getChannel('channel');
+  const channelId = selected?.id || process.env.PLAYER_DIRECTORY_CHANNEL_ID || config.playerDirectoryChannelId;
+  const channel = selected || await interaction.guild.channels.fetch(channelId).catch(() => null);
+  if (!isUsableTextChannel(channel)) return safeEdit(interaction, 'Please select a valid channel or set PLAYER_DIRECTORY_CHANNEL_ID.');
+  const card = await getPlayerCard(interaction.guildId, user.id);
+  if (!card) return safeEdit(interaction, `${user} does not have a GT Player Card yet.`);
+  const payload = await buildPlayerCardPayload(interaction.guild, card);
+  await channel.send(payload);
+  await safeEdit(interaction, `Posted ${user}'s GT Player Card in ${channel}.`);
 }
 
 async function handlePlayerList(interaction) {
-  const players = await listPlayers(interaction.guild.id);
-  if (!players.length) return safeEdit(interaction, 'No player cards saved yet.');
-  const lines = ['**GT Player Cards**', ...players.map(p => `• **${p.gtId}** — ${p.ign} | ${p.roster} | <@${p.discordId}>`)].join('\n');
-  await sendLongReply(interaction, lines);
+  const cards = await getPlayerCards(interaction.guildId, true);
+  if (!cards.length) return safeEdit(interaction, 'No GT Player Cards saved yet.');
+  const lines = cards.map(c => `• **${c.gtId || 'GT-???'}** — <@${c.userId}> — ${c.displayName || 'No name'} — ${c.roster || 'No roster'}${c.status === 'inactive' ? ' — inactive' : ''}`);
+  await sendLongReply(interaction, `**GT Player Cards (${cards.length})**\n\n${lines.join('\n')}`);
 }
 
 async function checkBirthdays() {
@@ -2304,8 +2492,8 @@ client.once('clientReady', async () => {
   catch (error) { console.error('Birthday database init failed:', error.message); }
   try { await initTwitchWatchDatabase(); }
   catch (error) { console.error('Twitch watch database init failed:', error.message); }
-  try { await initPlayerDatabase(); }
-  catch (error) { console.error('Player database init failed:', error.message); }
+  try { await initPlayerCardDatabase(); }
+  catch (error) { console.error('Player card database init failed:', error.message); }
   checkExpiredEventBans();
   setInterval(checkExpiredEventBans, 60 * 1000);
   checkAutoFortniteEvents();
@@ -2349,6 +2537,7 @@ client.on('interactionCreate', async interaction => {
       case 'playercreate': await handlePlayerCreate(interaction); break;
       case 'playeredit': await handlePlayerEdit(interaction); break;
       case 'playerdelete': await handlePlayerDelete(interaction); break;
+      case 'playercard': await handlePlayerCard(interaction); break;
       case 'playerpost': await handlePlayerPost(interaction); break;
       case 'playerlist': await handlePlayerList(interaction); break;
       default: await safeEdit(interaction, 'Unknown command.'); break;
