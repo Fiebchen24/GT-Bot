@@ -1,8 +1,8 @@
-# GT Role Bot V8.0
+# GT Role Bot V8.2
 
 GT Utility Bot with GT Cards v2.
 
-## New in V8.0
+## New in V8.2
 
 - GT Player Cards v2 as generated PNG images
 - One shared background asset: `assets/cards/backgrounds/player-card-bg.png`
@@ -79,7 +79,7 @@ The player card background must be here:
 assets/cards/backgrounds/player-card-bg.png
 ```
 
-This V8.0 zip already contains the background you uploaded in this chat.
+This V8.2 zip already contains the background you uploaded in this chat.
 
 ## Deploy
 
@@ -89,6 +89,20 @@ This V8.0 zip already contains the background you uploaded in this chat.
 4. Logs should show:
 
 ```txt
-GT ROLE BOT V8.0 LOADED
+GT ROLE BOT V8.2 LOADED
 Player card storage: PostgreSQL database connected.
 ```
+
+
+## V8.2 Player Card fixes
+- Country is rendered as a clean country-code badge instead of broken emoji flags.
+- Long roster labels are automatically fitted/wrapped.
+- Earnings/PR panels are hidden when the value is 0 or empty.
+- Social panel moves up when no stats are shown.
+- Social link buttons remain under the card for all saved socials.
+
+
+## V8.2 Player Card polish
+- Social rows are kept above the integrated footer/logo area.
+- Roster label is now the main text in the avatar panel.
+- GT-ID is smaller and shown below the roster label.

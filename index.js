@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.0 LOADED');
+console.log('GT ROLE BOT V8.2 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -2224,6 +2224,60 @@ function drawFittedText(ctx, text, x, y, maxWidth, size, family = 'Arial Black')
   ctx.fillText(text, x, y);
 }
 
+function drawCenteredFittedText(ctx, text, centerX, y, maxWidth, size, weight = 900, family = 'Arial Black') {
+  const value = String(text || '').trim();
+  let fontSize = size;
+  do {
+    ctx.font = `${weight} ${fontSize}px ${family}, Arial, sans-serif`;
+    if (ctx.measureText(value).width <= maxWidth) break;
+    fontSize -= 1;
+  } while (fontSize > 13);
+  ctx.textAlign = 'center';
+  ctx.fillText(value, centerX, y);
+}
+
+function drawRosterLabel(ctx, label, centerX, y, maxWidth, style) {
+  const text = String(label || 'GT MEMBER').toUpperCase();
+  const parts = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const part of parts) {
+    const test = current ? `${current} ${part}` : part;
+    ctx.font = '800 19px Arial, sans-serif';
+    if (ctx.measureText(test).width <= maxWidth || !current) current = test;
+    else { lines.push(current); current = part; }
+  }
+  if (current) lines.push(current);
+  ctx.fillStyle = style.secondary;
+  const useLines = lines.slice(0, 2);
+  const startY = useLines.length > 1 ? y - 11 : y;
+  useLines.forEach((line, index) => drawCenteredFittedText(ctx, line, centerX, startY + index * 23, maxWidth, 20, 800, 'Arial'));
+}
+
+function drawCountryRegion(ctx, card, x, y, maxWidth, style) {
+  const country = String(card.countryCode || '').trim().toUpperCase();
+  const region = String(card.region || '').trim().toUpperCase();
+  ctx.textAlign = 'left';
+  if (country) {
+    ctx.save();
+    roundedRect(ctx, x, y - 30, 64, 38, 10);
+    ctx.fillStyle = `rgba(255,255,255,0.10)`;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = style.secondary;
+    ctx.stroke();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 24px Arial Black, Arial, sans-serif';
+    ctx.fillText(country, x + 14, y - 3);
+    ctx.restore();
+  }
+  ctx.fillStyle = '#E5E7EB';
+  ctx.font = '700 30px Arial, sans-serif';
+  const text = [country ? '' : null, region].filter(Boolean).join(' · ');
+  if (region) ctx.fillText(region, x + (country ? 84 : 0), y - 2);
+  if (!country && !region) ctx.fillText('GT ESPORTS', x, y - 2);
+}
+
 async function loadImageFromUrl(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
@@ -2256,11 +2310,30 @@ async function renderPlayerCardImage(guild, card) {
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, width, height);
 
+  const hasEarnings = Number(card.earnings || 0) > 0;
+  const hasPr = Number(card.pr || 0) > 0;
+  const socials = [
+    card.twitch ? `Twitch: ${socialHandle(card.twitch)}` : '',
+    card.tiktok ? `TikTok: ${socialHandle(card.tiktok)}` : '',
+    card.x ? `X: ${socialHandle(card.x)}` : '',
+    card.youtube ? `YouTube: ${socialHandle(card.youtube)}` : ''
+  ].filter(Boolean);
+
   drawPanel(ctx, 68, 80, 325, 450, style, 0.42);
   drawPanel(ctx, 430, 85, 685, 185, style, 0.42);
-  drawPanel(ctx, 430, 295, 325, 165, style, 0.42);
-  drawPanel(ctx, 790, 295, 325, 165, style, 0.42);
-  drawPanel(ctx, 430, 485, 685, 90, style, 0.38);
+
+  const statY = 295;
+  if (hasEarnings && hasPr) {
+    drawPanel(ctx, 430, statY, 325, 165, style, 0.42);
+    drawPanel(ctx, 790, statY, 325, 165, style, 0.42);
+  } else if (hasEarnings || hasPr) {
+    drawPanel(ctx, 430, statY, 685, 165, style, 0.42);
+  }
+
+  // Keep socials away from the integrated footer/logo area.
+  const socialY = (hasEarnings || hasPr) ? (socials.length > 2 ? 450 : 470) : 305;
+  const socialH = (hasEarnings || hasPr) ? (socials.length > 2 ? 88 : 68) : (socials.length > 2 ? 112 : 90);
+  if (socials.length) drawPanel(ctx, 430, socialY, 685, socialH, style, 0.38);
 
   const member = await guild.members.fetch(card.userId).catch(() => null);
   const user = member?.user || await client.users.fetch(card.userId).catch(() => null);
@@ -2290,59 +2363,61 @@ async function renderPlayerCardImage(guild, card) {
     }
   }
 
-  // avatar panel text
+  // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = '900 42px Arial Black, Arial, sans-serif';
-  ctx.fillText(card.gtId || 'GT-???', 230, 395);
-  ctx.font = '800 24px Arial, sans-serif';
   ctx.fillStyle = style.secondary;
-  ctx.fillText(style.label, 230, 435);
+  drawRosterLabel(ctx, style.label, 230, 386, 285, style);
+  ctx.fillStyle = '#FFFFFF';
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 455, 245, 30, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
   ctx.textAlign = 'left';
   ctx.fillStyle = '#FFFFFF';
   drawFittedText(ctx, name, 465, 155, 610, 56);
-  const flag = countryFlag(card.countryCode);
-  ctx.font = '700 30px Arial, sans-serif';
-  ctx.fillStyle = '#E5E7EB';
-  const infoLine = [flag, card.countryCode?.toUpperCase(), card.region?.toUpperCase()].filter(Boolean).join('  ·  ');
-  ctx.fillText(infoLine || 'GT ESPORTS', 468, 205);
+  drawCountryRegion(ctx, card, 468, 205, 610, style);
   if (card.tagline) {
     ctx.font = '600 24px Arial, sans-serif';
     ctx.fillStyle = '#D1D5DB';
-    ctx.fillText(card.tagline, 468, 240);
+    const tagline = String(card.tagline).trim();
+    drawFittedText(ctx, tagline, 468, 240, 610, 24, 'Arial');
   }
 
-  // stats
+  // stats only when available
   ctx.textAlign = 'center';
-  ctx.fillStyle = style.secondary;
-  ctx.font = '800 24px Arial, sans-serif';
-  ctx.fillText('EARNINGS', 592, 345);
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = '900 44px Arial Black, Arial, sans-serif';
-  ctx.fillText(formatMoney(card.earnings), 592, 405);
+  if (hasEarnings && hasPr) {
+    ctx.fillStyle = style.secondary;
+    ctx.font = '800 24px Arial, sans-serif';
+    ctx.fillText('EARNINGS', 592, 345);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 44px Arial Black, Arial, sans-serif';
+    ctx.fillText(formatMoney(card.earnings), 592, 405);
 
-  ctx.fillStyle = style.secondary;
-  ctx.font = '800 24px Arial, sans-serif';
-  ctx.fillText('PR', 952, 345);
-  ctx.fillStyle = '#FFFFFF';
-  ctx.font = '900 48px Arial Black, Arial, sans-serif';
-  ctx.fillText(Number(card.pr || 0).toLocaleString('en-US'), 952, 405);
+    ctx.fillStyle = style.secondary;
+    ctx.font = '800 24px Arial, sans-serif';
+    ctx.fillText('PR', 952, 345);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 48px Arial Black, Arial, sans-serif';
+    ctx.fillText(Number(card.pr || 0).toLocaleString('en-US'), 952, 405);
+  } else if (hasEarnings || hasPr) {
+    ctx.fillStyle = style.secondary;
+    ctx.font = '800 24px Arial, sans-serif';
+    ctx.fillText(hasEarnings ? 'EARNINGS' : 'PR', 772, 345);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = '900 48px Arial Black, Arial, sans-serif';
+    ctx.fillText(hasEarnings ? formatMoney(card.earnings) : Number(card.pr || 0).toLocaleString('en-US'), 772, 405);
+  }
 
-  // socials on card
-  const socials = [
-    card.twitch ? `Twitch: ${socialHandle(card.twitch)}` : '',
-    card.tiktok ? `TikTok: ${socialHandle(card.tiktok)}` : '',
-    card.x ? `X: ${socialHandle(card.x)}` : '',
-    card.youtube ? `YouTube: ${socialHandle(card.youtube)}` : ''
-  ].filter(Boolean);
-  ctx.textAlign = 'left';
-  ctx.font = '700 24px Arial, sans-serif';
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillText(socials.length ? socials.slice(0, 2).join('   •   ') : 'GT PLAYER DIRECTORY', 468, 535);
-  if (socials.length > 2) ctx.fillText(socials.slice(2).join('   •   '), 468, 565);
+  // socials on card, moved up when no stats are shown
+  if (socials.length) {
+    ctx.textAlign = 'left';
+    ctx.font = '700 24px Arial, sans-serif';
+    ctx.fillStyle = '#FFFFFF';
+    const firstSocialLineY = (hasEarnings || hasPr) ? socialY + 38 : socialY + 50;
+    const secondSocialLineY = (hasEarnings || hasPr) ? socialY + 68 : socialY + 84;
+    ctx.fillText(socials.slice(0, 2).join('   •   '), 468, firstSocialLineY);
+    if (socials.length > 2) ctx.fillText(socials.slice(2).join('   •   '), 468, secondSocialLineY);
+  }
 
   return canvas.toBuffer('image/png');
 }
