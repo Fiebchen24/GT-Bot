@@ -1,7 +1,7 @@
 {
   "name": "gt-role-bot",
-  "version": "8.4.0",
-  "description": "GT Utility Bot V8.4 with GT Cards v2, birthday cards and 24h birthday roles, PostgreSQL storage, Twitch notifications, role tools and Fortnite ICS calendar.",
+  "version": "8.5.0",
+  "description": "GT Utility Bot V8.5 with GT Cards v2, birthday cards and 24h birthday roles, PostgreSQL storage, Twitch notifications, role tools and Fortnite ICS calendar.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"

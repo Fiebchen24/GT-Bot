@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.4 LOADED');
+console.log('GT ROLE BOT V8.5 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -229,7 +229,7 @@ const commands = [
       { name: 'GT Moderator', value: 'GT Moderator' },
       { name: 'GT Admin', value: 'GT Admin' },
       { name: 'GT Executive Director', value: 'GT Executive Director' },
-      { name: 'GT Coowner', value: 'GT Coowner' },
+      { name: 'GT Co-owner', value: 'GT Co-owner' },
       { name: 'GT Owner', value: 'GT Owner' }
     ))
     .addStringOption(o => o.setName('gt_id').setDescription('Optional custom GT-ID, e.g. GT-001 or 1'))
@@ -241,6 +241,7 @@ const commands = [
     .addStringOption(o => o.setName('tiktok').setDescription('TikTok username or link'))
     .addStringOption(o => o.setName('x').setDescription('X/Twitter username or link'))
     .addStringOption(o => o.setName('youtube').setDescription('YouTube channel/link'))
+    .addStringOption(o => o.setName('fortnitetracker').setDescription('Fortnite Tracker profile/link'))
     .addStringOption(o => o.setName('tagline').setDescription('Short tagline, max 120 characters'))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
@@ -262,7 +263,7 @@ const commands = [
       { name: 'GT Moderator', value: 'GT Moderator' },
       { name: 'GT Admin', value: 'GT Admin' },
       { name: 'GT Executive Director', value: 'GT Executive Director' },
-      { name: 'GT Coowner', value: 'GT Coowner' },
+      { name: 'GT Co-owner', value: 'GT Co-owner' },
       { name: 'GT Owner', value: 'GT Owner' }
     ))
     .addStringOption(o => o.setName('gt_id').setDescription('Optional custom GT-ID, e.g. GT-001 or 1'))
@@ -274,6 +275,7 @@ const commands = [
     .addStringOption(o => o.setName('tiktok').setDescription('TikTok username or link'))
     .addStringOption(o => o.setName('x').setDescription('X/Twitter username or link'))
     .addStringOption(o => o.setName('youtube').setDescription('YouTube channel/link'))
+    .addStringOption(o => o.setName('fortnitetracker').setDescription('Fortnite Tracker profile/link'))
     .addStringOption(o => o.setName('tagline').setDescription('Short tagline, max 120 characters'))
     .addStringOption(o => o.setName('status').setDescription('active or inactive').addChoices({ name: 'active', value: 'active' }, { name: 'inactive', value: 'inactive' }))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
@@ -2070,7 +2072,8 @@ const ROSTER_STYLES = {
   'GT Moderator': { primary: '#EF4444', secondary: '#EC4899', label: 'GT MODERATOR' },
   'GT Admin': { primary: '#FB923C', secondary: '#FDBA74', label: 'GT ADMIN' },
   'GT Executive Director': { primary: '#EC4899', secondary: '#22D3EE', label: 'GT EXECUTIVE DIRECTOR' },
-  'GT Coowner': { primary: '#FDA4AF', secondary: '#F472B6', label: 'GT COOWNER' },
+  'GT Co-owner': { primary: '#FDA4AF', secondary: '#F472B6', label: 'GT CO-OWNER' },
+  'GT Coowner': { primary: '#FDA4AF', secondary: '#F472B6', label: 'GT CO-OWNER' },
   'GT Owner': { primary: '#DC2626', secondary: '#FFFFFF', label: 'GT OWNER' }
 };
 
@@ -2101,6 +2104,7 @@ async function initPlayerCardDatabase() {
       tiktok TEXT,
       youtube TEXT,
       x TEXT,
+      fortnitetracker TEXT,
       tagline TEXT,
       status TEXT DEFAULT 'active',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -2116,6 +2120,7 @@ async function initPlayerCardDatabase() {
     `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS country_code TEXT`,
     `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS earnings INTEGER DEFAULT 0`,
     `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS pr INTEGER DEFAULT 0`,
+    `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS fortnitetracker TEXT`,
     `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS tagline TEXT`,
     `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active'`,
     `ALTER TABLE gt_player_cards ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()`,
@@ -2202,6 +2207,7 @@ function rowToPlayerCard(row) {
     tiktok: row.tiktok || '',
     youtube: row.youtube || '',
     x: row.x || '',
+    fortnitetracker: row.fortnitetracker || '',
     tagline: row.tagline || '',
     status: row.status || 'active',
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
@@ -2227,6 +2233,10 @@ function buildSocialUrl(type, value) {
   if (type === 'tiktok') return `https://tiktok.com/@${handle.replace(/^.*@/, '')}`;
   if (type === 'youtube') return /^@/.test(raw) ? `https://youtube.com/${raw}` : `https://youtube.com/${handle}`;
   if (type === 'x') return `https://x.com/${handle}`;
+  if (type === 'fortnitetracker') {
+    const cleaned = handle.replace(/^.*fortnitetracker\.com\/profile\/all\//i, '').replace(/^.*fortnitetracker\.com\/profile\/[^/]+\//i, '');
+    return /^https?:\/\//i.test(raw) ? raw : `https://fortnitetracker.com/profile/all/${encodeURIComponent(cleaned)}`;
+  }
   return raw;
 }
 
@@ -2239,6 +2249,8 @@ function socialHandle(value) {
     .replace(/^x\.com\//i, '')
     .replace(/^twitter\.com\//i, '')
     .replace(/^youtube\.com\/@?/i, '')
+    .replace(/^fortnitetracker\.com\/profile\/all\//i, '')
+    .replace(/^fortnitetracker\.com\/profile\/[^/]+\//i, '')
     .replace(/\/$/, '')
     .replace(/^@/, '');
 }
@@ -2302,8 +2314,8 @@ async function upsertPlayerCard(record, mode = 'create') {
 
   if (birthdayPool) {
     await birthdayPool.query(
-      `INSERT INTO gt_player_cards (guild_id, user_id, gt_id_number, gt_id, discord_username, display_name, roster, country_code, region, earnings, pr, twitch, tiktok, youtube, x, tagline, status, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())
+      `INSERT INTO gt_player_cards (guild_id, user_id, gt_id_number, gt_id, discord_username, display_name, roster, country_code, region, earnings, pr, twitch, tiktok, youtube, x, fortnitetracker, tagline, status, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,NOW(),NOW())
        ON CONFLICT (guild_id, user_id)
        DO UPDATE SET
          gt_id_number = COALESCE(EXCLUDED.gt_id_number, gt_player_cards.gt_id_number),
@@ -2319,10 +2331,11 @@ async function upsertPlayerCard(record, mode = 'create') {
          tiktok = COALESCE(NULLIF(EXCLUDED.tiktok, ''), gt_player_cards.tiktok),
          youtube = COALESCE(NULLIF(EXCLUDED.youtube, ''), gt_player_cards.youtube),
          x = COALESCE(NULLIF(EXCLUDED.x, ''), gt_player_cards.x),
+         fortnitetracker = COALESCE(NULLIF(EXCLUDED.fortnitetracker, ''), gt_player_cards.fortnitetracker),
          tagline = COALESCE(NULLIF(EXCLUDED.tagline, ''), gt_player_cards.tagline),
          status = COALESCE(NULLIF(EXCLUDED.status, ''), gt_player_cards.status),
          updated_at = NOW()`,
-      [merged.guildId, merged.userId, gtIdNumber, gtId, merged.discordUsername || '', merged.displayName || '', merged.roster || 'GT Member', merged.countryCode || '', merged.region || '', Number.isInteger(merged.earnings) ? merged.earnings : Number(merged.earnings || 0), Number.isInteger(merged.pr) ? merged.pr : Number(merged.pr || 0), merged.twitch || '', merged.tiktok || '', merged.youtube || '', merged.x || '', merged.tagline || '', merged.status || 'active']
+      [merged.guildId, merged.userId, gtIdNumber, gtId, merged.discordUsername || '', merged.displayName || '', merged.roster || 'GT Member', merged.countryCode || '', merged.region || '', Number.isInteger(merged.earnings) ? merged.earnings : Number(merged.earnings || 0), Number.isInteger(merged.pr) ? merged.pr : Number(merged.pr || 0), merged.twitch || '', merged.tiktok || '', merged.youtube || '', merged.x || '', merged.fortnitetracker || '', merged.tagline || '', merged.status || 'active']
     );
     return getPlayerCard(record.guildId, record.userId);
   }
@@ -2520,7 +2533,7 @@ async function renderPlayerCardImage(guild, card) {
   ctx.fillStyle = style.secondary;
   drawRosterLabel(ctx, style.label, 230, 386, 285, style);
   ctx.fillStyle = '#FFFFFF';
-  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 455, 245, 30, 900, 'Arial Black');
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 455, 245, 24, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
@@ -2539,21 +2552,21 @@ async function renderPlayerCardImage(guild, card) {
   ctx.textAlign = 'center';
   if (hasEarnings && hasPr) {
     ctx.fillStyle = style.secondary;
-    ctx.font = '800 24px Arial, sans-serif';
+    ctx.font = '800 30px Arial, sans-serif';
     ctx.fillText('EARNINGS', 592, 345);
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 44px Arial Black, Arial, sans-serif';
     ctx.fillText(formatMoney(card.earnings), 592, 405);
 
     ctx.fillStyle = style.secondary;
-    ctx.font = '800 24px Arial, sans-serif';
+    ctx.font = '800 30px Arial, sans-serif';
     ctx.fillText('PR', 952, 345);
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 48px Arial Black, Arial, sans-serif';
     ctx.fillText(Number(card.pr || 0).toLocaleString('en-US'), 952, 405);
   } else if (hasEarnings || hasPr) {
     ctx.fillStyle = style.secondary;
-    ctx.font = '800 24px Arial, sans-serif';
+    ctx.font = '800 30px Arial, sans-serif';
     ctx.fillText(hasEarnings ? 'EARNINGS' : 'PR', 772, 345);
     ctx.fillStyle = '#FFFFFF';
     ctx.font = '900 48px Arial Black, Arial, sans-serif';
@@ -2670,7 +2683,8 @@ function buildSocialButtons(card) {
     ['Twitch', 'twitch', card.twitch],
     ['TikTok', 'tiktok', card.tiktok],
     ['X', 'x', card.x],
-    ['YouTube', 'youtube', card.youtube]
+    ['YouTube', 'youtube', card.youtube],
+    ['Fortnite Tracker', 'fortnitetracker', card.fortnitetracker]
   ];
   for (const [label, type, value] of items) {
     const url = buildSocialUrl(type, value);
@@ -2691,31 +2705,63 @@ async function buildPlayerCardPayload(guild, card) {
   return { content, files: [file], components: buildSocialButtons(card) };
 }
 
-function makePlayerRecordFromInteraction(interaction, user, mode) {
-  const earnings = interaction.options.getInteger('earnings');
-  const pr = interaction.options.getInteger('pr');
-  const gtIdInput = normalizeGtIdInput(interaction.options.getString('gt_id'));
-  return {
-    guildId: interaction.guildId,
-    userId: user.id,
-    discordUsername: user.username || '',
-    displayName: cleanOptionalText(interaction.options.getString('display_name'), 80),
-    roster: cleanOptionalText(interaction.options.getString('roster'), 80),
-    countryCode: cleanOptionalText(interaction.options.getString('country'), 2).toUpperCase(),
-    region: cleanOptionalText(interaction.options.getString('region'), 30).toUpperCase(),
-    earnings: earnings === null ? undefined : earnings,
-    pr: pr === null ? undefined : pr,
-    twitch: cleanSocial(interaction.options.getString('twitch')),
-    tiktok: cleanSocial(interaction.options.getString('tiktok')),
-    youtube: cleanSocial(interaction.options.getString('youtube')),
-    x: cleanSocial(interaction.options.getString('x')),
-    tagline: cleanOptionalText(interaction.options.getString('tagline'), 120),
-    status: cleanOptionalText(interaction.options.getString('status'), 20) || (mode === 'create' ? 'active' : ''),
-    gtIdNumber: gtIdInput?.gtIdNumber,
-    gtId: gtIdInput?.gtId
-  };
+function optionWasProvided(interaction, name) {
+  return interaction.options.data.some(opt => opt.name === name);
 }
 
+function addStringField(record, interaction, fieldName, optionName, maxLength, transform = v => v) {
+  if (!optionWasProvided(interaction, optionName)) return;
+  const raw = interaction.options.getString(optionName);
+  const cleaned = cleanOptionalText(raw, maxLength);
+  record[fieldName] = transform(cleaned);
+}
+
+function addSocialField(record, interaction, fieldName, optionName) {
+  if (!optionWasProvided(interaction, optionName)) return;
+  record[fieldName] = cleanSocial(interaction.options.getString(optionName));
+}
+
+function makePlayerRecordFromInteraction(interaction, user, mode) {
+  const record = {
+    guildId: interaction.guildId,
+    userId: user.id,
+    discordUsername: user.username || ''
+  };
+
+  addStringField(record, interaction, 'displayName', 'display_name', 80);
+  addStringField(record, interaction, 'roster', 'roster', 80);
+  addStringField(record, interaction, 'countryCode', 'country', 2, v => v.toUpperCase());
+  addStringField(record, interaction, 'region', 'region', 30, v => v.toUpperCase());
+  addSocialField(record, interaction, 'twitch', 'twitch');
+  addSocialField(record, interaction, 'tiktok', 'tiktok');
+  addSocialField(record, interaction, 'youtube', 'youtube');
+  addSocialField(record, interaction, 'x', 'x');
+  addSocialField(record, interaction, 'fortnitetracker', 'fortnitetracker');
+  addStringField(record, interaction, 'tagline', 'tagline', 120);
+  addStringField(record, interaction, 'status', 'status', 20);
+
+  if (optionWasProvided(interaction, 'earnings')) {
+    const earnings = interaction.options.getInteger('earnings');
+    record.earnings = earnings === null ? undefined : earnings;
+  }
+  if (optionWasProvided(interaction, 'pr')) {
+    const pr = interaction.options.getInteger('pr');
+    record.pr = pr === null ? undefined : pr;
+  }
+  if (optionWasProvided(interaction, 'gt_id')) {
+    const gtIdInput = normalizeGtIdInput(interaction.options.getString('gt_id'));
+    record.gtIdNumber = gtIdInput?.gtIdNumber;
+    record.gtId = gtIdInput?.gtId;
+  }
+
+  if (mode === 'create') {
+    if (!record.displayName) record.displayName = user.username || 'GT Player';
+    if (!record.roster) record.roster = 'GT Member';
+    if (!record.status) record.status = 'active';
+  }
+
+  return record;
+}
 async function handlePlayerCreate(interaction) {
   const user = interaction.options.getUser('user');
   const existing = await getPlayerCard(interaction.guildId, user.id);

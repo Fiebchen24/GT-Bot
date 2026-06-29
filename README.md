@@ -116,7 +116,7 @@ Player card storage: PostgreSQL database connected.
 - GT Owner accent color is now white instead of black.
 
 
-## V8.4 Birthday Upgrade
+## V8.5 Birthday Upgrade
 
 New birthday features:
 
@@ -136,3 +136,12 @@ BIRTHDAY_CARD_ENABLED=true
 `BIRTHDAY_ROLE_ID` is optional. If it is set, the bot gives that role on the birthday and removes it automatically after 24 hours.
 
 The birthday card is sent automatically when the birthday user has an active GT Player Card. If no card exists, the bot sends the normal birthday text message.
+
+
+## V8.5 Player Card changes
+
+- `/playeredit` keeps all existing values when you only edit selected fields.
+- Roster option renamed to `GT Co-owner`. Existing `GT Coowner` cards still render as `GT CO-OWNER`.
+- GT-ID is smaller; card headings are larger.
+- Added optional `fortnitetracker` field for `/playercreate` and `/playeredit`.
+- Fortnite Tracker appears as a button below the card, not inside the card footer.
