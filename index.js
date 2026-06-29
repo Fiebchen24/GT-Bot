@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.2 LOADED');
+console.log('GT ROLE BOT V8.3 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -232,6 +232,7 @@ const commands = [
       { name: 'GT Coowner', value: 'GT Coowner' },
       { name: 'GT Owner', value: 'GT Owner' }
     ))
+    .addStringOption(o => o.setName('gt_id').setDescription('Optional custom GT-ID, e.g. GT-001 or 1'))
     .addStringOption(o => o.setName('country').setDescription('Country code, e.g. DE, FR, NL'))
     .addStringOption(o => o.setName('region').setDescription('Region, e.g. EU, NAC, ME'))
     .addIntegerOption(o => o.setName('earnings').setDescription('Earnings as number, e.g. 12500').setMinValue(0))
@@ -264,6 +265,7 @@ const commands = [
       { name: 'GT Coowner', value: 'GT Coowner' },
       { name: 'GT Owner', value: 'GT Owner' }
     ))
+    .addStringOption(o => o.setName('gt_id').setDescription('Optional custom GT-ID, e.g. GT-001 or 1'))
     .addStringOption(o => o.setName('country').setDescription('Country code, e.g. DE, FR, NL'))
     .addStringOption(o => o.setName('region').setDescription('Region, e.g. EU, NAC, ME'))
     .addIntegerOption(o => o.setName('earnings').setDescription('Earnings as number').setMinValue(0))
@@ -1952,7 +1954,7 @@ const ROSTER_STYLES = {
   'GT Admin': { primary: '#FB923C', secondary: '#FDBA74', label: 'GT ADMIN' },
   'GT Executive Director': { primary: '#EC4899', secondary: '#22D3EE', label: 'GT EXECUTIVE DIRECTOR' },
   'GT Coowner': { primary: '#FDA4AF', secondary: '#F472B6', label: 'GT COOWNER' },
-  'GT Owner': { primary: '#DC2626', secondary: '#050505', label: 'GT OWNER' }
+  'GT Owner': { primary: '#DC2626', secondary: '#FFFFFF', label: 'GT OWNER' }
 };
 
 function getRosterStyle(roster) {
@@ -2024,6 +2026,36 @@ function savePlayerCardStore(store) {
 
 function formatGtId(number) {
   return `GT-${String(number).padStart(3, '0')}`;
+}
+
+function normalizeGtIdInput(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(/^(?:GT[-\s]?)?(\d{1,6})$/i);
+  if (!match) {
+    throw new Error('GT-ID must look like GT-001 or 1.');
+  }
+  const number = Number(match[1]);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error('GT-ID number must be 1 or higher.');
+  }
+  return { gtIdNumber: number, gtId: formatGtId(number) };
+}
+
+async function gtIdExists(guildId, gtIdNumber, excludeUserId = null) {
+  if (!gtIdNumber) return false;
+  if (birthdayPool) {
+    const params = [guildId, gtIdNumber];
+    let query = 'SELECT user_id FROM gt_player_cards WHERE guild_id = $1 AND gt_id_number = $2';
+    if (excludeUserId) {
+      params.push(excludeUserId);
+      query += ' AND user_id <> $3';
+    }
+    const result = await birthdayPool.query(query, params);
+    return result.rows.length > 0;
+  }
+  const store = loadPlayerCardStore();
+  return store.cards.some(c => c.guildId === guildId && Number(c.gtIdNumber || 0) === Number(gtIdNumber) && (!excludeUserId || c.userId !== excludeUserId));
 }
 
 async function nextGtIdNumber(guildId) {
@@ -2135,12 +2167,13 @@ async function getPlayerCard(guildId, userId) {
 
 async function upsertPlayerCard(record, mode = 'create') {
   let existing = await getPlayerCard(record.guildId, record.userId);
-  let gtIdNumber = existing?.gtIdNumber || null;
-  let gtId = existing?.gtId || '';
-  if (!existing) {
+  let gtIdNumber = record.gtIdNumber || existing?.gtIdNumber || null;
+  let gtId = record.gtId || existing?.gtId || '';
+  if (!gtIdNumber) {
     gtIdNumber = await nextGtIdNumber(record.guildId);
     gtId = formatGtId(gtIdNumber);
   }
+  if (!gtId) gtId = formatGtId(gtIdNumber);
 
   const merged = {
     ...existing,
@@ -2156,6 +2189,8 @@ async function upsertPlayerCard(record, mode = 'create') {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())
        ON CONFLICT (guild_id, user_id)
        DO UPDATE SET
+         gt_id_number = COALESCE(EXCLUDED.gt_id_number, gt_player_cards.gt_id_number),
+         gt_id = COALESCE(NULLIF(EXCLUDED.gt_id, ''), gt_player_cards.gt_id),
          discord_username = COALESCE(NULLIF(EXCLUDED.discord_username, ''), gt_player_cards.discord_username),
          display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), gt_player_cards.display_name),
          roster = COALESCE(NULLIF(EXCLUDED.roster, ''), gt_player_cards.roster),
@@ -2452,6 +2487,7 @@ async function buildPlayerCardPayload(guild, card) {
 function makePlayerRecordFromInteraction(interaction, user, mode) {
   const earnings = interaction.options.getInteger('earnings');
   const pr = interaction.options.getInteger('pr');
+  const gtIdInput = normalizeGtIdInput(interaction.options.getString('gt_id'));
   return {
     guildId: interaction.guildId,
     userId: user.id,
@@ -2467,7 +2503,9 @@ function makePlayerRecordFromInteraction(interaction, user, mode) {
     youtube: cleanSocial(interaction.options.getString('youtube')),
     x: cleanSocial(interaction.options.getString('x')),
     tagline: cleanOptionalText(interaction.options.getString('tagline'), 120),
-    status: cleanOptionalText(interaction.options.getString('status'), 20) || (mode === 'create' ? 'active' : '')
+    status: cleanOptionalText(interaction.options.getString('status'), 20) || (mode === 'create' ? 'active' : ''),
+    gtIdNumber: gtIdInput?.gtIdNumber,
+    gtId: gtIdInput?.gtId
   };
 }
 
@@ -2475,7 +2513,15 @@ async function handlePlayerCreate(interaction) {
   const user = interaction.options.getUser('user');
   const existing = await getPlayerCard(interaction.guildId, user.id);
   if (existing) return safeEdit(interaction, `${user} already has a GT Player Card (${existing.gtId}). Use /playeredit instead.`);
-  const record = makePlayerRecordFromInteraction(interaction, user, 'create');
+  let record;
+  try {
+    record = makePlayerRecordFromInteraction(interaction, user, 'create');
+  } catch (error) {
+    return safeEdit(interaction, error.message);
+  }
+  if (record.gtIdNumber && await gtIdExists(interaction.guildId, record.gtIdNumber, user.id)) {
+    return safeEdit(interaction, `GT-ID **${record.gtId}** is already used by another player.`);
+  }
   const saved = await upsertPlayerCard(record, 'create');
   const payload = await buildPlayerCardPayload(interaction.guild, saved);
   await safeEditPayload(interaction, { content: `Created ${user}'s GT Player Card: **${saved.gtId}**`, files: payload.files, components: payload.components });
@@ -2485,9 +2531,18 @@ async function handlePlayerEdit(interaction) {
   const user = interaction.options.getUser('user');
   const existing = await getPlayerCard(interaction.guildId, user.id);
   if (!existing) return safeEdit(interaction, `${user} does not have a GT Player Card yet. Use /playercreate first.`);
-  const record = makePlayerRecordFromInteraction(interaction, user, 'edit');
-  record.gtIdNumber = existing.gtIdNumber;
-  record.gtId = existing.gtId;
+  let record;
+  try {
+    record = makePlayerRecordFromInteraction(interaction, user, 'edit');
+  } catch (error) {
+    return safeEdit(interaction, error.message);
+  }
+  if (!record.gtIdNumber) {
+    record.gtIdNumber = existing.gtIdNumber;
+    record.gtId = existing.gtId;
+  } else if (await gtIdExists(interaction.guildId, record.gtIdNumber, user.id)) {
+    return safeEdit(interaction, `GT-ID **${record.gtId}** is already used by another player.`);
+  }
   const saved = await upsertPlayerCard(record, 'edit');
   const payload = await buildPlayerCardPayload(interaction.guild, saved);
   await safeEditPayload(interaction, { content: `Updated ${user}'s GT Player Card: **${saved.gtId}**`, files: payload.files, components: payload.components });
