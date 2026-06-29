@@ -44,5 +44,7 @@
   },
   "birthdayChannelId": "",
   "birthdayDefaultTimezone": "Europe/Berlin",
-  "birthdayDefaultTime": "09:00"
+  "birthdayDefaultTime": "09:00",
+  "birthdayRoleId": "",
+  "birthdayCardEnabled": true
 }

@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.3 LOADED');
+console.log('GT ROLE BOT V8.4 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -1695,6 +1695,7 @@ async function checkAutoFortniteEvents() {
 
 
 const BIRTHDAYS_FILE = path.join(__dirname, 'birthdays.json');
+const BIRTHDAY_ROLES_FILE = path.join(__dirname, 'birthdayRoles.json');
 
 const birthdayDbUrl = process.env.DATABASE_URL || process.env.BIRTHDAY_DATABASE_URL || '';
 const birthdayPool = birthdayDbUrl && Pool
@@ -1722,6 +1723,17 @@ async function initBirthdayDatabase() {
       last_sent_year INTEGER,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (guild_id, user_id)
+    );
+  `);
+
+  await birthdayPool.query(`
+    CREATE TABLE IF NOT EXISTS gt_birthday_role_assignments (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role_id TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (guild_id, user_id, role_id)
     );
   `);
 
@@ -1819,6 +1831,111 @@ async function markBirthdaySent(guildId, userId, year) {
   if (birthday) {
     birthday.lastSentYear = year;
     saveBirthdayStore(store);
+  }
+}
+
+function loadBirthdayRoleStore() {
+  try {
+    if (!fs.existsSync(BIRTHDAY_ROLES_FILE)) return { assignments: [] };
+    const parsed = JSON.parse(fs.readFileSync(BIRTHDAY_ROLES_FILE, 'utf8'));
+    return { assignments: Array.isArray(parsed.assignments) ? parsed.assignments : [] };
+  } catch (error) {
+    console.error('Could not load birthdayRoles.json:', error.message);
+    return { assignments: [] };
+  }
+}
+
+function saveBirthdayRoleStore(store) {
+  fs.writeFileSync(BIRTHDAY_ROLES_FILE, JSON.stringify(store, null, 2));
+}
+
+function rowToBirthdayRoleAssignment(row) {
+  return {
+    guildId: row.guild_id,
+    userId: row.user_id,
+    roleId: row.role_id,
+    expiresAt: row.expires_at ? new Date(row.expires_at).toISOString() : null,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null
+  };
+}
+
+async function getBirthdayRoleAssignments() {
+  if (birthdayPool) {
+    const result = await birthdayPool.query('SELECT * FROM gt_birthday_role_assignments');
+    return result.rows.map(rowToBirthdayRoleAssignment);
+  }
+  return loadBirthdayRoleStore().assignments;
+}
+
+async function upsertBirthdayRoleAssignment(guildId, userId, roleId, expiresAt) {
+  const expiresIso = new Date(expiresAt).toISOString();
+  if (birthdayPool) {
+    await birthdayPool.query(
+      `INSERT INTO gt_birthday_role_assignments (guild_id, user_id, role_id, expires_at, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (guild_id, user_id, role_id)
+       DO UPDATE SET expires_at = EXCLUDED.expires_at`,
+      [guildId, userId, roleId, expiresIso]
+    );
+    return;
+  }
+  const store = loadBirthdayRoleStore();
+  const existing = store.assignments.find(a => a.guildId === guildId && a.userId === userId && a.roleId === roleId);
+  if (existing) existing.expiresAt = expiresIso;
+  else store.assignments.push({ guildId, userId, roleId, expiresAt: expiresIso, createdAt: new Date().toISOString() });
+  saveBirthdayRoleStore(store);
+}
+
+async function removeBirthdayRoleAssignment(guildId, userId, roleId) {
+  if (birthdayPool) {
+    await birthdayPool.query('DELETE FROM gt_birthday_role_assignments WHERE guild_id = $1 AND user_id = $2 AND role_id = $3', [guildId, userId, roleId]);
+    return;
+  }
+  const store = loadBirthdayRoleStore();
+  store.assignments = store.assignments.filter(a => !(a.guildId === guildId && a.userId === userId && a.roleId === roleId));
+  saveBirthdayRoleStore(store);
+}
+
+function getBirthdayRoleId() {
+  return process.env.BIRTHDAY_ROLE_ID || config.birthdayRoleId || '';
+}
+
+function isBirthdayCardEnabled() {
+  const raw = process.env.BIRTHDAY_CARD_ENABLED ?? config.birthdayCardEnabled ?? true;
+  return String(raw).toLowerCase() !== 'false';
+}
+
+async function giveBirthdayRole(guild, userId) {
+  const roleId = getBirthdayRoleId();
+  if (!roleId || !guild) return null;
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return null;
+  await member.roles.add(roleId);
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  await upsertBirthdayRoleAssignment(guild.id, userId, roleId, expiresAt);
+  return expiresAt;
+}
+
+async function checkExpiredBirthdayRoles() {
+  const assignments = await getBirthdayRoleAssignments().catch(error => {
+    console.error('Could not load birthday role assignments:', error.message);
+    return [];
+  });
+  if (!assignments.length) return;
+
+  const now = Date.now();
+  for (const assignment of assignments) {
+    const expires = assignment.expiresAt ? new Date(assignment.expiresAt).getTime() : 0;
+    if (!expires || expires > now) continue;
+    try {
+      const guild = await client.guilds.fetch(assignment.guildId).catch(() => null);
+      const member = guild ? await guild.members.fetch(assignment.userId).catch(() => null) : null;
+      if (member) await member.roles.remove(assignment.roleId).catch(() => {});
+      await removeBirthdayRoleAssignment(assignment.guildId, assignment.userId, assignment.roleId);
+      console.log(`Birthday role expired and removed for ${assignment.userId}`);
+    } catch (error) {
+      console.error(`Failed to remove expired birthday role for ${assignment.userId}:`, error.message);
+    }
   }
 }
 
@@ -2457,6 +2574,96 @@ async function renderPlayerCardImage(guild, card) {
   return canvas.toBuffer('image/png');
 }
 
+async function renderBirthdayPlayerCardImage(guild, card, birthday, year) {
+  const basePng = await renderPlayerCardImage(guild, card);
+  const baseImage = await loadImage(basePng);
+  const width = 1200;
+  const height = 675;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  const style = getRosterStyle(card.roster);
+
+  ctx.drawImage(baseImage, 0, 0, width, height);
+
+  const banner = ctx.createLinearGradient(390, 0, 1120, 0);
+  banner.addColorStop(0, `${style.primary}ee`);
+  banner.addColorStop(1, `${style.secondary}dd`);
+  roundRect(ctx, 415, 520, 720, 82, 26);
+  ctx.fillStyle = banner;
+  ctx.shadowColor = style.secondary;
+  ctx.shadowBlur = 22;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+  ctx.stroke();
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = '900 34px Arial Black, Arial, sans-serif';
+  ctx.fillText('HAPPY BIRTHDAY', 775, 555);
+
+  const age = ageTurningThisYear(birthday, year);
+  ctx.font = '800 22px Arial, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(age ? `GT celebrates you today · turning ${age}` : 'GT celebrates you today', 775, 586);
+
+  // small birthday sparkle dots in roster colors
+  ctx.save();
+  for (const dot of [
+    [75, 78, 8, style.secondary], [1110, 94, 7, style.primary], [1022, 518, 6, style.secondary],
+    [88, 548, 7, style.primary], [1140, 330, 5, '#FFFFFF'], [385, 560, 5, '#FFFFFF']
+  ]) {
+    ctx.beginPath();
+    ctx.fillStyle = dot[3];
+    ctx.arc(dot[0], dot[1], dot[2], 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  return canvas.toBuffer('image/png');
+}
+
+async function buildBirthdayCardPayload(guild, card, birthday, year) {
+  const png = await renderBirthdayPlayerCardImage(guild, card, birthday, year);
+  const filename = `${card.gtId || 'GT-CARD'}-${(card.displayName || 'birthday').replace(/[^a-z0-9_-]/gi, '_')}-birthday.png`;
+  const file = new AttachmentBuilder(png, { name: filename });
+  const age = ageTurningThisYear(birthday, year);
+  const ageText = age ? `
+Today they turn **${age}**! 🥳` : '';
+  return {
+    content: `🎂 **Happy Birthday <@${birthday.userId}>!** 💜${ageText}
+GT wishes you an amazing day, lots of good vibes and many wins today 🥳`,
+    files: [file],
+    components: buildSocialButtons(card)
+  };
+}
+
+async function sendBirthdayGreeting(channel, birthday, year) {
+  const age = ageTurningThisYear(birthday, year);
+  const ageText = age ? `
+Today they turn **${age}**! 🥳` : '';
+  const baseMessage = `🎂 **Happy Birthday <@${birthday.userId}>!** 💜${ageText}
+
+GT wishes you an amazing day, lots of good vibes and many wins today 🥳`;
+
+  if (isBirthdayCardEnabled()) {
+    const guild = channel.guild || await client.guilds.fetch(birthday.guildId).catch(() => null);
+    const card = guild ? await getPlayerCard(birthday.guildId, birthday.userId).catch(() => null) : null;
+    if (guild && card && card.status !== 'inactive') {
+      try {
+        const payload = await buildBirthdayCardPayload(guild, card, birthday, year);
+        await channel.send(payload);
+        return;
+      } catch (error) {
+        console.error(`Birthday card render failed for ${birthday.userId}:`, error.message);
+      }
+    }
+  }
+
+  await channel.send(baseMessage);
+}
+
 function buildSocialButtons(card) {
   const buttons = [];
   const items = [
@@ -2606,10 +2813,14 @@ async function checkBirthdays() {
     try {
       const channel = await client.channels.fetch(channelId).catch(() => null);
       if (!isUsableTextChannel(channel)) continue;
-      const age = ageTurningThisYear(birthday, year);
-      const ageText = age ? `\nToday they turn **${age}**! 🥳` : '';
-      await channel.send(`🎂 Happy Birthday <@${birthday.userId}>! 💜${ageText}\n\nGT wishes you an amazing day, lots of good vibes and many wins today 🥳`);
+      await sendBirthdayGreeting(channel, birthday, year);
+      const guild = channel.guild || await client.guilds.fetch(birthday.guildId).catch(() => null);
+      const expiresAt = guild ? await giveBirthdayRole(guild, birthday.userId).catch(error => {
+        console.error(`Failed to give birthday role to ${birthday.userId}:`, error.message);
+        return null;
+      }) : null;
       await markBirthdaySent(birthday.guildId, birthday.userId, year);
+      if (expiresAt) console.log(`Birthday role given to ${birthday.userId} until ${expiresAt.toISOString()}`);
     } catch (error) {
       console.error(`Failed to send birthday reminder for ${birthday.userId}:`, error.message);
     }
@@ -2632,6 +2843,8 @@ client.once('clientReady', async () => {
   setInterval(checkTwitchLiveNotifications, Number(process.env.TWITCH_NOTIFY_INTERVAL_SECONDS || config.twitchLiveNotifications?.intervalSeconds || 60) * 1000);
   checkBirthdays();
   setInterval(checkBirthdays, 60 * 1000);
+  checkExpiredBirthdayRoles();
+  setInterval(checkExpiredBirthdayRoles, 60 * 1000);
 });
 
 client.on('interactionCreate', async interaction => {

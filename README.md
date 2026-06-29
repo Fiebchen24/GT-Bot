@@ -114,3 +114,25 @@ Player card storage: PostgreSQL database connected.
 - Accepted formats: `GT-001`, `GT 001`, or `1`.
 - Duplicate GT-IDs are blocked per server.
 - GT Owner accent color is now white instead of black.
+
+
+## V8.4 Birthday Upgrade
+
+New birthday features:
+
+- automatic birthday message with ping
+- optional temporary birthday role for 24 hours
+- automatic removal of the birthday role after expiry
+- optional GT birthday card based on the player's GT Player Card design
+
+Required/optional environment variables:
+
+```env
+BIRTHDAY_CHANNEL_ID=your_birthday_channel_id
+BIRTHDAY_ROLE_ID=your_birthday_role_id
+BIRTHDAY_CARD_ENABLED=true
+```
+
+`BIRTHDAY_ROLE_ID` is optional. If it is set, the bot gives that role on the birthday and removes it automatically after 24 hours.
+
+The birthday card is sent automatically when the birthday user has an active GT Player Card. If no card exists, the bot sends the normal birthday text message.
