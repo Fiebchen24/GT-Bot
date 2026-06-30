@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.7.4 LOADED');
+console.log('GT ROLE BOT V8.7.6 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -2682,9 +2682,9 @@ async function renderPlayerCardImage(guild, card) {
   // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
   ctx.fillStyle = style.secondary;
-  drawRosterLabel(ctx, style.label, 230, 390, 285, style);
+  drawRosterLabel(ctx, style.label, 230, 452, 285, style);
   ctx.fillStyle = '#FFFFFF';
-  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 468, 245, 21, 900, 'Arial Black');
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 512, 245, 21, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
