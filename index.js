@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.7.1 LOADED');
+console.log('GT ROLE BOT V8.7.2 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -376,7 +376,20 @@ async function safeEditPayload(interaction, payload) {
     if (interaction.deferred || interaction.replied) return await interaction.editReply(payload);
     return await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
   } catch (error) {
-    console.error('Failed to respond with payload:', error);
+    const message = error?.rawError?.message || error?.message || '';
+    const hasComponents = Array.isArray(payload?.components) && payload.components.length > 0;
+    if (hasComponents && /Invalid Form Body/i.test(message)) {
+      console.warn('Discord rejected button components. Retrying response without buttons.');
+      const fallback = { ...payload, components: [] };
+      try {
+        if (interaction.deferred || interaction.replied) return await interaction.editReply(fallback);
+        return await interaction.reply({ ...fallback, flags: MessageFlags.Ephemeral });
+      } catch (retryError) {
+        console.error('Failed to respond with payload fallback:', retryError);
+      }
+    } else {
+      console.error('Failed to respond with payload:', error);
+    }
   }
 }
 
@@ -2776,6 +2789,15 @@ GT wishes you an amazing day, lots of good vibes and many wins today 🥳`;
   await channel.send(baseMessage);
 }
 
+function isValidButtonUrl(url) {
+  try {
+    const parsed = new URL(String(url || ''));
+    return ['http:', 'https:'].includes(parsed.protocol) && parsed.hostname.includes('.');
+  } catch {
+    return false;
+  }
+}
+
 function buildSocialButtons(card) {
   const buttons = [];
   const items = [
@@ -2788,11 +2810,15 @@ function buildSocialButtons(card) {
   for (const [label, type, value] of items) {
     const url = buildSocialUrl(type, value);
     if (!url) continue;
+    if (!isValidButtonUrl(url)) {
+      console.warn(`Skipping invalid ${label} button URL: ${url}`);
+      continue;
+    }
     buttons.push(new ButtonBuilder().setLabel(label).setStyle(ButtonStyle.Link).setURL(url));
   }
   if (!buttons.length) return [];
   const rows = [];
-  for (let i = 0; i < buttons.length; i += 5) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+  for (let i = 0; i < buttons.length; i += 4) rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 4)));
   return rows;
 }
 
