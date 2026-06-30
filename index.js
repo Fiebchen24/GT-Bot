@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.7.3 LOADED');
+console.log('GT ROLE BOT V8.7.4 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -2270,23 +2270,55 @@ function cleanOptionalText(value, max = 100) {
 }
 
 function cleanSocial(value) {
-  return cleanOptionalText(value, 180).replace(/^@/, '');
+  return cleanOptionalText(value, 180).replace(/^@/, '').trim();
+}
+
+function firstCleanToken(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[<>]/g, '')
+    .split(/\s+/)[0]
+    .replace(/[),.;]+$/g, '')
+    .trim();
+}
+
+function safeUrl(url) {
+  const raw = firstCleanToken(url);
+  if (!raw) return '';
+  const withProtocol = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    if (!parsed.hostname || !parsed.hostname.includes('.')) return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
 }
 
 function buildSocialUrl(type, value) {
-  const raw = String(value || '').trim();
+  const raw = firstCleanToken(value);
   if (!raw) return '';
-  if (/^https?:\/\//i.test(raw)) return raw;
-  const handle = raw.replace(/^@/, '');
-  if (type === 'twitch') return `https://twitch.tv/${handle.replace(/^.*twitch\.tv\//i, '')}`;
-  if (type === 'tiktok') return `https://tiktok.com/@${handle.replace(/^.*@/, '')}`;
-  if (type === 'youtube') return /^@/.test(raw) ? `https://youtube.com/${raw}` : `https://youtube.com/${handle}`;
-  if (type === 'x') return `https://x.com/${handle}`;
-  if (type === 'fortnitetracker') {
-    const cleaned = handle.replace(/^.*fortnitetracker\.com\/profile\/all\//i, '').replace(/^.*fortnitetracker\.com\/profile\/[^/]+\//i, '');
-    return /^https?:\/\//i.test(raw) ? raw : `https://fortnitetracker.com/profile/all/${encodeURIComponent(cleaned)}`;
+
+  if (/^https?:\/\//i.test(raw) || /^(www\.)?(twitch\.tv|tiktok\.com|x\.com|twitter\.com|youtube\.com|youtu\.be|fortnitetracker\.com)\//i.test(raw)) {
+    const direct = safeUrl(raw);
+    if (!direct) return '';
+    if (type === 'twitch' && !/twitch\.tv/i.test(direct)) return '';
+    if (type === 'tiktok' && !/tiktok\.com/i.test(direct)) return '';
+    if (type === 'youtube' && !/(youtube\.com|youtu\.be)/i.test(direct)) return '';
+    if (type === 'x' && !/(x\.com|twitter\.com)/i.test(direct)) return '';
+    if (type === 'fortnitetracker' && !/fortnitetracker\.com/i.test(direct)) return '';
+    return direct;
   }
-  return raw;
+
+  const handle = raw.replace(/^@/, '').replace(/[^a-zA-Z0-9_.-]/g, '');
+  if (!handle) return '';
+  if (type === 'twitch') return safeUrl(`https://twitch.tv/${encodeURIComponent(handle)}`);
+  if (type === 'tiktok') return safeUrl(`https://tiktok.com/@${encodeURIComponent(handle)}`);
+  if (type === 'youtube') return safeUrl(raw.startsWith('@') ? `https://youtube.com/${encodeURIComponent(raw)}` : `https://youtube.com/@${encodeURIComponent(handle)}`);
+  if (type === 'x') return safeUrl(`https://x.com/${encodeURIComponent(handle)}`);
+  if (type === 'fortnitetracker') return safeUrl(`https://fortnitetracker.com/profile/all/${encodeURIComponent(handle)}`);
+  return '';
 }
 
 function socialHandle(value) {
@@ -2972,6 +3004,19 @@ async function handlePlayerCard(interaction) {
   await safeEditPayload(interaction, payload);
 }
 
+async function sendPlayerPayloadToChannel(channel, payload) {
+  try {
+    return await channel.send(payload);
+  } catch (error) {
+    const message = error?.rawError?.message || error?.message || '';
+    if (Array.isArray(payload?.components) && payload.components.length && /Invalid Form Body|URL_TYPE_INVALID_URL|components/i.test(message)) {
+      console.warn('Discord rejected Player Card buttons. Posting card without buttons.', message);
+      return await channel.send({ ...payload, components: [] });
+    }
+    throw error;
+  }
+}
+
 async function handlePlayerPost(interaction) {
   const user = interaction.options.getUser('user');
   const selected = interaction.options.getChannel('channel');
@@ -2984,7 +3029,7 @@ async function handlePlayerPost(interaction) {
     card = await upsertPlayerCard({ guildId: interaction.guildId, userId: user.id, status: 'active' }, 'edit');
   }
   const payload = await buildPlayerCardPayload(interaction.guild, card);
-  await channel.send(payload);
+  await sendPlayerPayloadToChannel(channel, payload);
   await safeEdit(interaction, `Posted and approved ${user}'s GT Player Card in ${channel}.`);
 }
 

@@ -1,8 +1,8 @@
-# GT Role Bot V8.7.3
+# GT Role Bot V8.7.4
 
 GT Utility Bot with GT Cards v2 and player self-service requests.
 
-## New in V8.7.3
+## New in V8.7.4
 
 - Players can create/update their own card request with `/playerrequest`
 - Self-created cards are saved as `pending`
@@ -75,7 +75,7 @@ assets/cards/backgrounds/player-card-bg.png
 ```
 
 
-## V8.7.3 Patch
+## V8.7.4 Patch
 
 - Roster label moved slightly down on the player card.
 - GT-ID remains below the roster label.
@@ -84,5 +84,11 @@ assets/cards/backgrounds/player-card-bg.png
 Expected Render log:
 
 ```txt
-GT ROLE BOT V8.7.3 LOADED
+GT ROLE BOT V8.7.4 LOADED
 ```
+
+
+## V8.7.4
+- Fixes Player Card post button URL errors more aggressively.
+- Invalid button URLs are skipped.
+- If Discord still rejects buttons, the card is posted without buttons instead of failing.

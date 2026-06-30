@@ -1,7 +1,7 @@
 {
   "name": "gt-role-bot",
-  "version": "8.7.3",
-  "description": "GT Utility Bot V8.7.3 with player card roster alignment fix and GT Cards v2.",
+  "version": "8.7.4",
+  "description": "GT Utility Bot V8.7.4 with player card roster alignment fix and GT Cards v2.",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
