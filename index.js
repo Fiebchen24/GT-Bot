@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.7 LOADED');
+console.log('GT ROLE BOT V8.7.1 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -2579,18 +2579,30 @@ async function renderPlayerCardImage(guild, card) {
   drawPanel(ctx, 68, 80, 325, 450, style, 0.42);
   drawPanel(ctx, 430, 85, 685, 185, style, 0.42);
 
-  const statY = 295;
+  const rightPanelBottom = 530; // aligns with the avatar/profile panel bottom
+  const statY = 292;
+  const statH = 118; // flatter stat boxes so they do not collide with socials
   if (hasEarnings && hasPr) {
-    drawPanel(ctx, 430, statY, 325, 165, style, 0.42);
-    drawPanel(ctx, 790, statY, 325, 165, style, 0.42);
+    drawPanel(ctx, 430, statY, 325, statH, style, 0.42);
+    drawPanel(ctx, 790, statY, 325, statH, style, 0.42);
   } else if (hasEarnings || hasPr) {
-    drawPanel(ctx, 430, statY, 685, 165, style, 0.42);
+    drawPanel(ctx, 430, statY, 685, statH, style, 0.42);
   }
 
-  // Keep socials away from the integrated footer/logo area.
-  const socialY = (hasEarnings || hasPr) ? (socials.length > 2 ? 450 : 470) : 305;
-  const socialH = (hasEarnings || hasPr) ? (socials.length > 2 ? 88 : 68) : (socials.length > 2 ? 112 : 90);
-  if (socials.length) drawPanel(ctx, 430, socialY, 685, socialH, style, 0.38);
+  // Keep socials away from stats and the integrated footer/logo area.
+  // The social panel bottom aligns with the avatar/profile panel bottom.
+  let socialY;
+  let socialH;
+  if (socials.length) {
+    if (hasEarnings || hasPr) {
+      socialH = socials.length > 2 ? 92 : 72;
+      socialY = rightPanelBottom - socialH;
+    } else {
+      socialY = 300;
+      socialH = rightPanelBottom - socialY;
+    }
+    drawPanel(ctx, 430, socialY, 685, socialH, style, 0.38);
+  }
 
   const member = await guild.members.fetch(card.userId).catch(() => null);
   const user = member?.user || await client.users.fetch(card.userId).catch(() => null);
@@ -2623,9 +2635,9 @@ async function renderPlayerCardImage(guild, card) {
   // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
   ctx.fillStyle = style.secondary;
-  drawRosterLabel(ctx, style.label, 230, 400, 285, style);
+  drawRosterLabel(ctx, style.label, 230, 370, 285, style);
   ctx.fillStyle = '#FFFFFF';
-  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 490, 245, 21, 900, 'Arial Black');
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 468, 245, 21, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
@@ -2644,30 +2656,30 @@ async function renderPlayerCardImage(guild, card) {
   ctx.textAlign = 'center';
   if (hasEarnings && hasPr) {
     ctx.fillStyle = style.secondary;
-    ctx.font = '800 30px Arial, sans-serif';
-    ctx.fillText('EARNINGS', 592, 345);
+    ctx.font = '800 25px Arial, sans-serif';
+    ctx.fillText('EARNINGS', 592, 332);
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '900 44px Arial Black, Arial, sans-serif';
-    ctx.fillText(formatMoney(card.earnings), 592, 405);
+    ctx.font = '900 39px Arial Black, Arial, sans-serif';
+    ctx.fillText(formatMoney(card.earnings), 592, 386);
 
     ctx.fillStyle = style.secondary;
-    ctx.font = '800 30px Arial, sans-serif';
-    ctx.fillText('PR', 952, 345);
+    ctx.font = '800 25px Arial, sans-serif';
+    ctx.fillText('PR', 952, 332);
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '900 48px Arial Black, Arial, sans-serif';
-    ctx.fillText(Number(card.pr || 0).toLocaleString('en-US'), 952, 405);
+    ctx.font = '900 42px Arial Black, Arial, sans-serif';
+    ctx.fillText(Number(card.pr || 0).toLocaleString('en-US'), 952, 386);
   } else if (hasEarnings || hasPr) {
     ctx.fillStyle = style.secondary;
-    ctx.font = '800 30px Arial, sans-serif';
-    ctx.fillText(hasEarnings ? 'EARNINGS' : 'PR', 772, 345);
+    ctx.font = '800 25px Arial, sans-serif';
+    ctx.fillText(hasEarnings ? 'EARNINGS' : 'PR', 772, 332);
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = '900 48px Arial Black, Arial, sans-serif';
-    ctx.fillText(hasEarnings ? formatMoney(card.earnings) : Number(card.pr || 0).toLocaleString('en-US'), 772, 405);
+    ctx.font = '900 42px Arial Black, Arial, sans-serif';
+    ctx.fillText(hasEarnings ? formatMoney(card.earnings) : Number(card.pr || 0).toLocaleString('en-US'), 772, 386);
   }
 
   // socials on card, fitted into a two-column grid so they never run past the panel edge.
   if (socials.length) {
-    const gridY = (hasEarnings || hasPr) ? socialY + 38 : socialY + 42;
+    const gridY = (hasEarnings || hasPr) ? socialY + 32 : socialY + 42;
     drawSocialGrid(ctx, socials, 468, gridY, 610, style);
   }
 
