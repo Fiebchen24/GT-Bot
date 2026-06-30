@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.5 LOADED');
+console.log('GT ROLE BOT V8.6 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -2401,46 +2401,102 @@ function drawCenteredFittedText(ctx, text, centerX, y, maxWidth, size, weight = 
   ctx.fillText(value, centerX, y);
 }
 
-function drawRosterLabel(ctx, label, centerX, y, maxWidth, style) {
-  const text = String(label || 'GT MEMBER').toUpperCase();
-  const parts = text.split(/\s+/).filter(Boolean);
+function splitTextToFit(ctx, text, maxWidth, font) {
+  ctx.font = font;
+  const parts = String(text || '').trim().split(/\s+/).filter(Boolean);
   const lines = [];
   let current = '';
   for (const part of parts) {
     const test = current ? `${current} ${part}` : part;
-    ctx.font = '800 19px Arial, sans-serif';
     if (ctx.measureText(test).width <= maxWidth || !current) current = test;
     else { lines.push(current); current = part; }
   }
   if (current) lines.push(current);
-  ctx.fillStyle = style.secondary;
-  const useLines = lines.slice(0, 2);
-  const startY = useLines.length > 1 ? y - 11 : y;
-  useLines.forEach((line, index) => drawCenteredFittedText(ctx, line, centerX, startY + index * 23, maxWidth, 20, 800, 'Arial'));
+  return lines;
 }
 
-function drawCountryRegion(ctx, card, x, y, maxWidth, style) {
+function drawRosterLabel(ctx, label, centerX, y, maxWidth, style) {
+  const text = String(label || 'GT MEMBER').toUpperCase();
+  ctx.fillStyle = style.secondary;
+  let fontSize = 32;
+  let lines = [];
+  do {
+    lines = splitTextToFit(ctx, text, maxWidth, `900 ${fontSize}px Arial Black, Arial, sans-serif`).slice(0, 3);
+    const widest = Math.max(...lines.map(line => ctx.measureText(line).width), 0);
+    if (widest <= maxWidth && lines.length <= 3) break;
+    fontSize -= 1;
+  } while (fontSize > 18);
+  const lineHeight = Math.max(26, fontSize + 5);
+  const totalHeight = (lines.length - 1) * lineHeight;
+  const startY = y - totalHeight / 2;
+  lines.forEach((line, index) => drawCenteredFittedText(ctx, line, centerX, startY + index * lineHeight, maxWidth, fontSize, 900, 'Arial Black'));
+}
+
+async function loadFlagImage(countryCode) {
+  const cc = String(countryCode || '').trim().toLowerCase();
+  if (!/^[a-z]{2}$/.test(cc)) return null;
+  try {
+    const res = await fetch(`https://flagcdn.com/w80/${cc}.png`, {
+      headers: { 'User-Agent': 'GT-Role-Bot/8.6' }
+    });
+    if (!res.ok) return null;
+    return loadImage(Buffer.from(await res.arrayBuffer()));
+  } catch {
+    return null;
+  }
+}
+
+async function drawCountryRegion(ctx, card, x, y, maxWidth, style) {
   const country = String(card.countryCode || '').trim().toUpperCase();
   const region = String(card.region || '').trim().toUpperCase();
   ctx.textAlign = 'left';
+  let regionX = x;
+
   if (country) {
+    const flag = await loadFlagImage(country);
     ctx.save();
-    roundedRect(ctx, x, y - 30, 64, 38, 10);
+    roundedRect(ctx, x, y - 37, 66, 44, 10);
     ctx.fillStyle = `rgba(255,255,255,0.10)`;
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = style.secondary;
     ctx.stroke();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = '900 24px Arial Black, Arial, sans-serif';
-    ctx.fillText(country, x + 14, y - 3);
+    if (flag) {
+      ctx.save();
+      roundedRect(ctx, x + 8, y - 29, 50, 30, 6);
+      ctx.clip();
+      ctx.drawImage(flag, x + 8, y - 29, 50, 30);
+      ctx.restore();
+    } else {
+      const emoji = countryFlag(country);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.font = '28px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", Arial, sans-serif';
+      ctx.fillText(emoji || country, x + 10, y - 4);
+    }
     ctx.restore();
+    regionX = x + 84;
   }
+
   ctx.fillStyle = '#E5E7EB';
   ctx.font = '700 30px Arial, sans-serif';
-  const text = [country ? '' : null, region].filter(Boolean).join(' · ');
-  if (region) ctx.fillText(region, x + (country ? 84 : 0), y - 2);
+  if (region) ctx.fillText(region, regionX, y - 2);
   if (!country && !region) ctx.fillText('GT ESPORTS', x, y - 2);
+}
+
+function drawSocialGrid(ctx, socials, x, y, w, style) {
+  if (!socials.length) return;
+  const gap = 24;
+  const colW = Math.floor((w - gap) / 2);
+  const rowH = 34;
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#FFFFFF';
+  for (let i = 0; i < socials.length; i++) {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const tx = x + col * (colW + gap);
+    const ty = y + row * rowH;
+    drawFittedText(ctx, socials[i], tx, ty, colW, 23, 'Arial');
+  }
 }
 
 async function loadImageFromUrl(url) {
@@ -2531,16 +2587,16 @@ async function renderPlayerCardImage(guild, card) {
   // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
   ctx.fillStyle = style.secondary;
-  drawRosterLabel(ctx, style.label, 230, 386, 285, style);
+  drawRosterLabel(ctx, style.label, 230, 388, 285, style);
   ctx.fillStyle = '#FFFFFF';
-  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 455, 245, 24, 900, 'Arial Black');
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 474, 245, 21, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
   ctx.textAlign = 'left';
   ctx.fillStyle = '#FFFFFF';
   drawFittedText(ctx, name, 465, 155, 610, 56);
-  drawCountryRegion(ctx, card, 468, 205, 610, style);
+  await drawCountryRegion(ctx, card, 468, 205, 610, style);
   if (card.tagline) {
     ctx.font = '600 24px Arial, sans-serif';
     ctx.fillStyle = '#D1D5DB';
@@ -2573,15 +2629,10 @@ async function renderPlayerCardImage(guild, card) {
     ctx.fillText(hasEarnings ? formatMoney(card.earnings) : Number(card.pr || 0).toLocaleString('en-US'), 772, 405);
   }
 
-  // socials on card, moved up when no stats are shown
+  // socials on card, fitted into a two-column grid so they never run past the panel edge.
   if (socials.length) {
-    ctx.textAlign = 'left';
-    ctx.font = '700 24px Arial, sans-serif';
-    ctx.fillStyle = '#FFFFFF';
-    const firstSocialLineY = (hasEarnings || hasPr) ? socialY + 38 : socialY + 50;
-    const secondSocialLineY = (hasEarnings || hasPr) ? socialY + 68 : socialY + 84;
-    ctx.fillText(socials.slice(0, 2).join('   •   '), 468, firstSocialLineY);
-    if (socials.length > 2) ctx.fillText(socials.slice(2).join('   •   '), 468, secondSocialLineY);
+    const gridY = (hasEarnings || hasPr) ? socialY + 38 : socialY + 42;
+    drawSocialGrid(ctx, socials, 468, gridY, 610, style);
   }
 
   return canvas.toBuffer('image/png');
