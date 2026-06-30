@@ -2623,9 +2623,9 @@ async function renderPlayerCardImage(guild, card) {
   // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
   ctx.fillStyle = style.secondary;
-  drawRosterLabel(ctx, style.label, 230, 370, 285, style);
+  drawRosterLabel(ctx, style.label, 230, 400, 285, style);
   ctx.fillStyle = '#FFFFFF';
-  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 468, 245, 21, 900, 'Arial Black');
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 490, 245, 21, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
