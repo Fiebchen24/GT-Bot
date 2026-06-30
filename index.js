@@ -242,7 +242,7 @@ const commands = [
     .addStringOption(o => o.setName('x').setDescription('X/Twitter username or link'))
     .addStringOption(o => o.setName('youtube').setDescription('YouTube channel/link'))
     .addStringOption(o => o.setName('fortnitetracker').setDescription('Fortnite Tracker profile/link'))
-    .addStringOption(o => o.setName('tagline').setDescription('Short tagline, max 120 characters'))
+    .addStringOption(o => o.setName('about_me').setDescription('About me text, max 120 characters'))
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
   new SlashCommandBuilder()
@@ -276,8 +276,44 @@ const commands = [
     .addStringOption(o => o.setName('x').setDescription('X/Twitter username or link'))
     .addStringOption(o => o.setName('youtube').setDescription('YouTube channel/link'))
     .addStringOption(o => o.setName('fortnitetracker').setDescription('Fortnite Tracker profile/link'))
-    .addStringOption(o => o.setName('tagline').setDescription('Short tagline, max 120 characters'))
+    .addStringOption(o => o.setName('about_me').setDescription('About me text, max 120 characters'))
     .addStringOption(o => o.setName('status').setDescription('active or inactive').addChoices({ name: 'active', value: 'active' }, { name: 'inactive', value: 'inactive' }))
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
+
+  new SlashCommandBuilder()
+    .setName('playerrequest')
+    .setDescription('Create or update your own GT Player Card request for staff review.')
+    .addStringOption(o => o.setName('display_name').setDescription('Name shown on the card'))
+    .addStringOption(o => o.setName('roster').setDescription('Your GT roster/design').addChoices(
+      { name: 'GT Member', value: 'GT Member' },
+      { name: 'GT Queens', value: 'GT Queens' },
+      { name: 'GT Comp Queens', value: 'GT Comp Queens' },
+      { name: 'GT Rising Talents', value: 'GT Rising Talents' },
+      { name: 'GT Ranked', value: 'GT Ranked' },
+      { name: 'GT Content Creator', value: 'GT Content Creator' },
+      { name: 'GT Academy Comp', value: 'GT Academy Comp' },
+      { name: 'GT Pro Comp', value: 'GT Pro Comp' },
+      { name: 'GT eSports', value: 'GT eSports' },
+      { name: 'GT Moderator', value: 'GT Moderator' },
+      { name: 'GT Admin', value: 'GT Admin' },
+      { name: 'GT Executive Director', value: 'GT Executive Director' },
+      { name: 'GT Co-owner', value: 'GT Co-owner' },
+      { name: 'GT Owner', value: 'GT Owner' }
+    ))
+    .addStringOption(o => o.setName('country').setDescription('Country code, e.g. DE, FR, NL'))
+    .addStringOption(o => o.setName('region').setDescription('Region, e.g. EU, NAC, ME'))
+    .addIntegerOption(o => o.setName('earnings').setDescription('Earnings as number, e.g. 12500').setMinValue(0))
+    .addIntegerOption(o => o.setName('pr').setDescription('PR as number').setMinValue(0))
+    .addStringOption(o => o.setName('twitch').setDescription('Twitch username or link'))
+    .addStringOption(o => o.setName('tiktok').setDescription('TikTok username or link'))
+    .addStringOption(o => o.setName('x').setDescription('X/Twitter username or link'))
+    .addStringOption(o => o.setName('youtube').setDescription('YouTube channel/link'))
+    .addStringOption(o => o.setName('fortnitetracker').setDescription('Fortnite Tracker profile/link'))
+    .addStringOption(o => o.setName('about_me').setDescription('About me text, max 120 characters')),
+
+  new SlashCommandBuilder()
+    .setName('playerpending')
+    .setDescription('Staff: list pending GT Player Card requests.')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages),
 
   new SlashCommandBuilder()
@@ -2437,7 +2473,7 @@ async function loadFlagImage(countryCode) {
   if (!/^[a-z]{2}$/.test(cc)) return null;
   try {
     const res = await fetch(`https://flagcdn.com/w80/${cc}.png`, {
-      headers: { 'User-Agent': 'GT-Role-Bot/8.7' }
+      headers: { 'User-Agent': 'GT-Role-Bot/8.6' }
     });
     if (!res.ok) return null;
     return loadImage(Buffer.from(await res.arrayBuffer()));
@@ -2587,9 +2623,9 @@ async function renderPlayerCardImage(guild, card) {
   // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
   ctx.fillStyle = style.secondary;
-  drawRosterLabel(ctx, style.label, 230, 420, 285, style);
+  drawRosterLabel(ctx, style.label, 230, 370, 285, style);
   ctx.fillStyle = '#FFFFFF';
-  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 502, 245, 21, 900, 'Arial Black');
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 468, 245, 21, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
@@ -2600,8 +2636,8 @@ async function renderPlayerCardImage(guild, card) {
   if (card.tagline) {
     ctx.font = '600 24px Arial, sans-serif';
     ctx.fillStyle = '#D1D5DB';
-    const tagline = String(card.tagline).trim();
-    drawFittedText(ctx, tagline, 468, 240, 610, 24, 'Arial');
+    const aboutMe = String(card.tagline).trim();
+    drawFittedText(ctx, aboutMe, 468, 240, 610, 24, 'Arial');
   }
 
   // stats only when available
@@ -2752,7 +2788,7 @@ async function buildPlayerCardPayload(guild, card) {
   const png = await renderPlayerCardImage(guild, card);
   const filename = `${card.gtId || 'GT-CARD'}-${(card.displayName || 'player').replace(/[^a-z0-9_-]/gi, '_')}.png`;
   const file = new AttachmentBuilder(png, { name: filename });
-  const content = `**${card.gtId || 'GT-???'} · ${card.displayName || 'GT Player'}**\n${getRosterStyle(card.roster).label}${card.status === 'inactive' ? ' · inactive' : ''}`;
+  const content = `**${card.gtId || 'GT-???'} · ${card.displayName || 'GT Player'}**\n${getRosterStyle(card.roster).label}${card.status && card.status !== 'active' ? ` · ${card.status}` : ''}`;
   return { content, files: [file], components: buildSocialButtons(card) };
 }
 
@@ -2788,7 +2824,7 @@ function makePlayerRecordFromInteraction(interaction, user, mode) {
   addSocialField(record, interaction, 'youtube', 'youtube');
   addSocialField(record, interaction, 'x', 'x');
   addSocialField(record, interaction, 'fortnitetracker', 'fortnitetracker');
-  addStringField(record, interaction, 'tagline', 'tagline', 120);
+  addStringField(record, interaction, 'tagline', 'about_me', 120);
   addStringField(record, interaction, 'status', 'status', 20);
 
   if (optionWasProvided(interaction, 'earnings')) {
@@ -2852,6 +2888,36 @@ async function handlePlayerEdit(interaction) {
   await safeEditPayload(interaction, { content: `Updated ${user}'s GT Player Card: **${saved.gtId}**`, files: payload.files, components: payload.components });
 }
 
+async function handlePlayerRequest(interaction) {
+  const user = interaction.user;
+  const existing = await getPlayerCard(interaction.guildId, user.id);
+  let record;
+  try {
+    record = makePlayerRecordFromInteraction(interaction, user, existing ? 'edit' : 'create');
+  } catch (error) {
+    return safeEdit(interaction, error.message);
+  }
+
+  if (!existing && !record.displayName) record.displayName = user.username || 'GT Player';
+  if (!existing && !record.roster) record.roster = 'GT Member';
+  record.status = 'pending';
+
+  const saved = await upsertPlayerCard(record, existing ? 'edit' : 'create');
+  const payload = await buildPlayerCardPayload(interaction.guild, saved);
+  await safeEditPayload(interaction, {
+    content: `✅ Your GT Player Card request was saved as **${saved.gtId}** and is now waiting for staff review.`,
+    files: payload.files,
+    components: payload.components
+  });
+}
+
+async function handlePlayerPending(interaction) {
+  const cards = (await getPlayerCards(interaction.guildId, true)).filter(c => c.status === 'pending');
+  if (!cards.length) return safeEdit(interaction, 'No pending GT Player Card requests right now.');
+  const lines = cards.map(c => `• **${c.gtId || 'GT-???'}** — <@${c.userId}> — ${c.displayName || 'No name'} — ${c.roster || 'No roster'}`);
+  await sendLongReply(interaction, `**Pending GT Player Card Requests (${cards.length})**\n\n${lines.join('\n')}`);
+}
+
 async function handlePlayerDelete(interaction) {
   const user = interaction.options.getUser('user');
   const card = await deactivatePlayerCard(interaction.guildId, user.id);
@@ -2872,17 +2938,20 @@ async function handlePlayerPost(interaction) {
   const channelId = selected?.id || process.env.PLAYER_DIRECTORY_CHANNEL_ID || config.playerDirectoryChannelId;
   const channel = selected || await interaction.guild.channels.fetch(channelId).catch(() => null);
   if (!isUsableTextChannel(channel)) return safeEdit(interaction, 'Please select a valid channel or set PLAYER_DIRECTORY_CHANNEL_ID.');
-  const card = await getPlayerCard(interaction.guildId, user.id);
+  let card = await getPlayerCard(interaction.guildId, user.id);
   if (!card) return safeEdit(interaction, `${user} does not have a GT Player Card yet.`);
+  if (card.status === 'pending') {
+    card = await upsertPlayerCard({ guildId: interaction.guildId, userId: user.id, status: 'active' }, 'edit');
+  }
   const payload = await buildPlayerCardPayload(interaction.guild, card);
   await channel.send(payload);
-  await safeEdit(interaction, `Posted ${user}'s GT Player Card in ${channel}.`);
+  await safeEdit(interaction, `Posted and approved ${user}'s GT Player Card in ${channel}.`);
 }
 
 async function handlePlayerList(interaction) {
   const cards = await getPlayerCards(interaction.guildId, true);
   if (!cards.length) return safeEdit(interaction, 'No GT Player Cards saved yet.');
-  const lines = cards.map(c => `• **${c.gtId || 'GT-???'}** — <@${c.userId}> — ${c.displayName || 'No name'} — ${c.roster || 'No roster'}${c.status === 'inactive' ? ' — inactive' : ''}`);
+  const lines = cards.map(c => `• **${c.gtId || 'GT-???'}** — <@${c.userId}> — ${c.displayName || 'No name'} — ${c.roster || 'No roster'}${c.status && c.status !== 'active' ? ` — ${c.status}` : ''}`);
   await sendLongReply(interaction, `**GT Player Cards (${cards.length})**\n\n${lines.join('\n')}`);
 }
 
@@ -2976,6 +3045,8 @@ client.on('interactionCreate', async interaction => {
       case 'birthdaylist': await handleBirthdayList(interaction); break;
       case 'playercreate': await handlePlayerCreate(interaction); break;
       case 'playeredit': await handlePlayerEdit(interaction); break;
+      case 'playerrequest': await handlePlayerRequest(interaction); break;
+      case 'playerpending': await handlePlayerPending(interaction); break;
       case 'playerdelete': await handlePlayerDelete(interaction); break;
       case 'playercard': await handlePlayerCard(interaction); break;
       case 'playerpost': await handlePlayerPost(interaction); break;
