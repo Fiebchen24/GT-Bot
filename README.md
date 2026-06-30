@@ -1,15 +1,15 @@
-# GT Role Bot V8.7
+# GT Role Bot V8.7.3
 
 GT Utility Bot with GT Cards v2 and player self-service requests.
 
-## New in V8.7
+## New in V8.7.3
 
 - Players can create/update their own card request with `/playerrequest`
 - Self-created cards are saved as `pending`
 - Staff can review with `/playercard` and `/playerpending`
 - Staff posts and approves with `/playerpost`
 - Existing staff commands remain: `/playercreate`, `/playeredit`, `/playerdelete`, `/playerlist`
-- Roster text on the card was moved slightly up so it no longer sits too low
+- Roster text on the card was moved slightly down for better balance in the left panel
 - PostgreSQL storage for player cards, birthdays and Twitch watchers
 
 ## Player Card Workflow
@@ -72,4 +72,17 @@ The player card background must be here:
 
 ```txt
 assets/cards/backgrounds/player-card-bg.png
+```
+
+
+## V8.7.3 Patch
+
+- Roster label moved slightly down on the player card.
+- GT-ID remains below the roster label.
+- Birthday card round-rect helper alias added for stability.
+
+Expected Render log:
+
+```txt
+GT ROLE BOT V8.7.3 LOADED
 ```

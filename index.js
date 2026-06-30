@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.7.2 LOADED');
+console.log('GT ROLE BOT V8.7.3 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -2415,6 +2415,8 @@ function roundedRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+const roundRect = roundedRect;
+
 function drawPanel(ctx, x, y, w, h, style, alpha = 0.50) {
   ctx.save();
   roundedRect(ctx, x, y, w, h, 24);
@@ -2648,7 +2650,7 @@ async function renderPlayerCardImage(guild, card) {
   // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
   ctx.fillStyle = style.secondary;
-  drawRosterLabel(ctx, style.label, 230, 370, 285, style);
+  drawRosterLabel(ctx, style.label, 230, 390, 285, style);
   ctx.fillStyle = '#FFFFFF';
   drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 468, 245, 21, 900, 'Arial Black');
 
