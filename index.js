@@ -23,7 +23,7 @@ const {
 
 const config = require('./config.json');
 
-console.log('GT ROLE BOT V8.6 LOADED');
+console.log('GT ROLE BOT V8.7 LOADED');
 
 const TOKEN = process.env.TOKEN || process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -2437,7 +2437,7 @@ async function loadFlagImage(countryCode) {
   if (!/^[a-z]{2}$/.test(cc)) return null;
   try {
     const res = await fetch(`https://flagcdn.com/w80/${cc}.png`, {
-      headers: { 'User-Agent': 'GT-Role-Bot/8.6' }
+      headers: { 'User-Agent': 'GT-Role-Bot/8.7' }
     });
     if (!res.ok) return null;
     return loadImage(Buffer.from(await res.arrayBuffer()));
@@ -2587,9 +2587,9 @@ async function renderPlayerCardImage(guild, card) {
   // avatar panel text: roster is the main label, GT-ID is smaller below it.
   ctx.textAlign = 'center';
   ctx.fillStyle = style.secondary;
-  drawRosterLabel(ctx, style.label, 230, 388, 285, style);
+  drawRosterLabel(ctx, style.label, 230, 420, 285, style);
   ctx.fillStyle = '#FFFFFF';
-  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 474, 245, 21, 900, 'Arial Black');
+  drawCenteredFittedText(ctx, card.gtId || 'GT-???', 230, 502, 245, 21, 900, 'Arial Black');
 
   // main info
   const name = (card.displayName || member?.displayName || user?.username || 'GT PLAYER').toUpperCase();
